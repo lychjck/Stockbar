@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Carbon.HIToolbox
 
 @main
 final class StockBarApp {
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // Popover
     private let popover = NSPopover()
     private let popoverController = PopoverController()
+
+    // Desktop floating card widget
+    private let desktopCard = DesktopCardController()
+    private var toggleHotKey: GlobalHotKey?
 
     // Data layer
     private let store = WatchlistStore()
@@ -89,11 +94,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.handleReorder(order: order)
         }
 
+        // Desktop card: toggle from the popover header; clicking its own close
+        // button just hides it (no extra state to sync since the button is
+        // stateless).
+        popoverController.onToggleDesktopCard = { [weak self] in
+            self?.toggleDesktopCard()
+        }
+
+        // System-wide hot key (⌥⌘S) to show/hide the desktop card from anywhere.
+        // Carbon hot keys need no Accessibility permission and work in the
+        // background. If the combo is already taken, registration silently fails.
+        toggleHotKey = GlobalHotKey(
+            keyCode: UInt32(kVK_ANSI_S),
+            modifiers: UInt32(cmdKey | optionKey)
+        ) { [weak self] in
+            Task { @MainActor in self?.toggleDesktopCard() }
+        }
+
         startQuoteTimer()
         startMinuteTimer()
         startWatchingConfigFile()
 
-        Task { await self.refreshAll(force: true) }
+        Task {
+            await self.refreshAll(force: true)
+            // Restore the desktop card from last session *after* the first data
+            // load so it shows live numbers immediately.
+            self.desktopCard.restoreIfNeeded()
+            if self.desktopCard.isVisible {
+                await self.fetchAllMinutesIfNeeded()
+                self.pushDataToCard()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -132,6 +163,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popoverController.lastUpdated = lastFetchedAt
         popoverController.marketPhase = MarketHours.currentPhase()
         popoverController.reload()
+    }
+
+    /// Mirror current data into the desktop card. The card ignores the call
+    /// while hidden, so this is safe to invoke unconditionally.
+    private func pushDataToCard() {
+        desktopCard.items = watchlist.activeItems
+        desktopCard.quotes = quotes
+        desktopCard.minutes = minutes
+        desktopCard.lastUpdated = lastFetchedAt
+        desktopCard.marketPhase = MarketHours.currentPhase()
+        desktopCard.reload()
+    }
+
+    /// Show/hide the desktop card. Triggered by the popover button and the
+    /// global hot key. When showing, push fresh data and pull minute series.
+    private func toggleDesktopCard() {
+        desktopCard.toggle()
+        if desktopCard.isVisible {
+            pushDataToCard()
+            Task { await self.fetchAllMinutesIfNeeded() }
+        }
     }
 
     // MARK: - Refresh loops
@@ -188,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.quotes = [:]
             self.lastFetchedAt = Date()
             pushDataToController()
+            pushDataToCard()
             return
         }
         let symbols = items.map { $0.normalizedSymbol }
@@ -202,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             if popover.isShown {
                 pushDataToController()
             }
+            pushDataToCard()
         } catch {
             // Keep stale quotes; mark in tooltip.
             statusItem.button?.toolTip = "Last fetch failed: \(error)"
@@ -214,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let pts = try await minuteFetcher.fetch(symbol: symbol)
             self.minutes[symbol] = pts
             if popover.isShown { pushDataToController() }
+            pushDataToCard()
         } catch {
             // ignore — chart will show "no data"
         }
@@ -236,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         if popover.isShown { pushDataToController() }
+        pushDataToCard()
     }
 
     // MARK: - Add / remove
@@ -246,6 +302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.watchlist = updated
             // Push immediately so the new row shows up before the file watcher fires.
             pushDataToController()
+            pushDataToCard()
             Task { await self.refreshAll(force: true) }
         } catch {
             statusItem.button?.toolTip = "Failed to add: \(error)"
@@ -262,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             quotes.removeValue(forKey: sym)
             minutes.removeValue(forKey: sym)
             pushDataToController()
+            pushDataToCard()
         } catch {
             statusItem.button?.toolTip = "Failed to remove: \(error)"
         }

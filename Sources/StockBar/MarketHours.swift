@@ -15,6 +15,18 @@ enum MarketHours {
         var isLive: Bool {
             self == .morningSession || self == .afternoonSession
         }
+
+        /// Short human-readable Chinese label for the current phase.
+        var label: String {
+            switch self {
+            case .weekend: return "周末休市"
+            case .preMarket: return "盘前"
+            case .morningSession: return "● 上午盘"
+            case .lunchBreak: return "午休"
+            case .afternoonSession: return "● 下午盘"
+            case .postMarket: return "已收盘"
+            }
+        }
     }
 
     /// Compute the current phase based on the local Asia/Shanghai time.

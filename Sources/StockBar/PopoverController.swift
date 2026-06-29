@@ -29,6 +29,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// of normalized symbols.
     var onReorder: ((_ orderedSymbols: [String]) -> Void)?
 
+    /// Called when the user clicks the header's desktop-card toggle button.
+    var onToggleDesktopCard: (() -> Void)?
+
     /// Weak ref to the hosting popover so we can resize it when content changes.
     weak var popover: NSPopover?
 
@@ -42,6 +45,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let configButton = NSButton()
     private let quitButton = NSButton()
     private let addToggleButton = NSButton()
+    private let desktopCardButton = NSButton()
 
     // ---- Add bar (collapsible row below header)
     private let addBar = NSStackView()
@@ -91,6 +95,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
         configureHeaderButton(refreshButton, symbol: "arrow.clockwise", tooltip: "Refresh", action: #selector(handleRefresh))
         configureHeaderButton(addToggleButton, symbol: "plus.circle", tooltip: "Add stock / ETF", action: #selector(handleToggleAddBar))
+        configureHeaderButton(desktopCardButton, symbol: "macwindow.on.rectangle", tooltip: "显示 / 隐藏桌面卡片", action: #selector(handleToggleDesktopCard))
         configureHeaderButton(configButton, symbol: "doc.text", tooltip: "Open watchlist.json", action: #selector(handleOpenConfig))
         configureHeaderButton(quitButton, symbol: "power", tooltip: "Quit StockBar", action: #selector(handleQuit))
 
@@ -102,6 +107,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         headerBar.addArrangedSubview(phaseLabel)
         headerBar.addArrangedSubview(spacer)
         headerBar.addArrangedSubview(addToggleButton)
+        headerBar.addArrangedSubview(desktopCardButton)
         headerBar.addArrangedSubview(refreshButton)
         headerBar.addArrangedSubview(configButton)
         headerBar.addArrangedSubview(quitButton)
@@ -635,6 +641,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     @objc private func handleRefresh() { onRefresh?() }
     @objc private func handleOpenConfig() { onOpenConfig?() }
     @objc private func handleQuit() { onQuit?() }
+    @objc private func handleToggleDesktopCard() { onToggleDesktopCard?() }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
