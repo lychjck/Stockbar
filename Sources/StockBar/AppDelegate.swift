@@ -101,6 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.toggleDesktopCard()
         }
 
+        // When a row in the desktop card is tapped, pull that symbol's minute
+        // series so the expanded chart is fresh.
+        desktopCard.onSelectRow = { [weak self] item in
+            guard let self, let item else { return }
+            Task { await self.fetchMinutes(for: item.normalizedSymbol, alsoMissing: false) }
+        }
+
         // System-wide hot key (⌥⌘S) to show/hide the desktop card from anywhere.
         // Carbon hot keys need no Accessibility permission and work in the
         // background. If the combo is already taken, registration silently fails.

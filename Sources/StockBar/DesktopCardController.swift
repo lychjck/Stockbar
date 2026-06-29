@@ -30,12 +30,19 @@ final class DesktopCardController {
     /// keep any toggle state in sync). The controller has already hidden itself.
     var onClose: (() -> Void)?
 
+    /// Fired when the user selects/deselects a row, so AppDelegate can fetch
+    /// that symbol's minute series. nil = detail collapsed.
+    var onSelectRow: ((WatchItem?) -> Void)?
+
     var isVisible: Bool { window?.isVisible ?? false }
 
     init() {
         cardView.onClose = { [weak self] in
             self?.hide()
             self?.onClose?()
+        }
+        cardView.onSelectRow = { [weak self] item in
+            self?.onSelectRow?(item)
         }
     }
 
@@ -121,6 +128,12 @@ final class DesktopCardController {
 
         win.contentView = blur
 
+        // Resize the window when a row is expanded/collapsed.
+        cardView.onLayoutChanged = { [weak self, weak win] in
+            guard let self, let win else { return }
+            self.resizeToFit(win)
+        }
+
         // Restore saved origin, else top-right corner of the main screen.
         if let origin = savedOrigin() {
             win.setFrameOrigin(origin)
@@ -175,6 +188,14 @@ final class DesktopCardView: NSView {
 
     var onClose: (() -> Void)?
 
+    /// Fired when the user selects/deselects a row (to fetch its minute series).
+    /// nil means the detail was collapsed.
+    var onSelectRow: ((WatchItem?) -> Void)?
+
+    /// Fired when the card's content height changes (row selected/deselected),
+    /// so the controller can resize the window.
+    var onLayoutChanged: (() -> Void)?
+
     private let header = HeaderDragView()
     private let titleLabel = NSTextField(labelWithString: "StockBar")
     private let statusLabel = NSTextField(labelWithString: "")
@@ -182,9 +203,21 @@ final class DesktopCardView: NSView {
     private let rowsStack = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "暂无关注标的")
 
+    // Inline detail (full intraday chart for the selected row).
+    private let detailContainer = NSView()
+    private let detailTitle = NSTextField(labelWithString: "")
+    private let detailSubtitle = NSTextField(labelWithString: "")
+    private let detailChart = ChartView(frame: NSRect(x: 0, y: 0, width: 360, height: 160))
+    private var detailWidthConstraint: NSLayoutConstraint?
+    private var selectedSymbol: String?
+
     // Reused rows, keyed by normalized symbol.
     private var rowViews: [String: WatchlistRowView] = [:]
     private var currentSymbols: [String] = []
+
+    // Last data snapshot, so the detail can refresh on quote ticks.
+    private var quotes: [String: Quote] = [:]
+    private var minutes: [String: [MinutePoint]] = [:]
 
     // Layout metrics.
     private let topInset: CGFloat = 8
@@ -192,6 +225,7 @@ final class DesktopCardView: NSView {
     private let headerGap: CGFloat = 4
     private let rowHeight: CGFloat = 40
     private let bottomInset: CGFloat = 8
+    private let detailHeight: CGFloat = 200
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -273,12 +307,62 @@ final class DesktopCardView: NSView {
             emptyLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
             emptyLabel.heightAnchor.constraint(equalToConstant: rowHeight),
         ])
+
+        configureDetail()
+    }
+
+    /// Builds the inline detail container (title · subtitle · full chart). It is
+    /// inserted into `rowsStack` below the selected row on demand.
+    private func configureDetail() {
+        detailContainer.translatesAutoresizingMaskIntoConstraints = false
+        detailContainer.wantsLayer = true
+
+        detailTitle.font = NSFont.systemFont(ofSize: 16, weight: .bold)
+        detailTitle.textColor = .labelColor
+        detailTitle.translatesAutoresizingMaskIntoConstraints = false
+        detailTitle.drawsBackground = false
+        detailTitle.isBezeled = false
+        detailTitle.isEditable = false
+        detailContainer.addSubview(detailTitle)
+
+        let subDesc = NSFont.systemFont(ofSize: 12, weight: .semibold).fontDescriptor.withDesign(.rounded)
+        if let d = subDesc, let f = NSFont(descriptor: d, size: 12) {
+            detailSubtitle.font = f
+        } else {
+            detailSubtitle.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        }
+        detailSubtitle.textColor = .secondaryLabelColor
+        detailSubtitle.translatesAutoresizingMaskIntoConstraints = false
+        detailSubtitle.drawsBackground = false
+        detailSubtitle.isBezeled = false
+        detailSubtitle.isEditable = false
+        detailContainer.addSubview(detailSubtitle)
+
+        detailChart.style = .full
+        detailChart.translatesAutoresizingMaskIntoConstraints = false
+        detailContainer.addSubview(detailChart)
+
+        NSLayoutConstraint.activate([
+            detailContainer.heightAnchor.constraint(equalToConstant: detailHeight),
+
+            detailTitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 6),
+            detailTitle.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 16),
+
+            detailSubtitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 8),
+            detailSubtitle.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -16),
+
+            detailChart.topAnchor.constraint(equalTo: detailTitle.bottomAnchor, constant: 4),
+            detailChart.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 8),
+            detailChart.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -8),
+            detailChart.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor, constant: -8),
+        ])
     }
 
     /// Preferred total height for the current item count.
     func preferredHeight() -> CGFloat {
         let bodyRows = max(items.count, 1)   // empty state still reserves one row
-        return topInset + headerHeight + headerGap + CGFloat(bodyRows) * rowHeight + bottomInset
+        let detail = (selectedSymbol != nil) ? detailHeight : 0
+        return topInset + headerHeight + headerGap + CGFloat(bodyRows) * rowHeight + detail + bottomInset
     }
 
     // Keep a copy so preferredHeight can read it.
@@ -292,6 +376,8 @@ final class DesktopCardView: NSView {
         marketPhase: MarketHours.Phase
     ) {
         self.items = items
+        self.quotes = quotes
+        self.minutes = minutes
 
         // Header status line: "14:21:08 · ● 下午盘".
         var status = ""
@@ -307,6 +393,7 @@ final class DesktopCardView: NSView {
         if items.isEmpty {
             emptyLabel.isHidden = false
             rowsStack.isHidden = true
+            selectedSymbol = nil
             rebuildRows(for: [])
             return
         }
@@ -317,6 +404,11 @@ final class DesktopCardView: NSView {
         if symbols != currentSymbols {
             rebuildRows(for: items)
             currentSymbols = symbols
+            // The selected symbol may have disappeared from the list.
+            if let sel = selectedSymbol, rowViews[sel] == nil {
+                selectedSymbol = nil
+            }
+            relocateDetail()
         }
 
         for item in items {
@@ -324,7 +416,77 @@ final class DesktopCardView: NSView {
             guard let row = rowViews[sym] else { continue }
             let q = quotes[sym]
             row.update(item: item, quote: q, minutes: minutes[sym] ?? [], prevClose: q?.prevClose)
+            row.isSelected = (sym == selectedSymbol)
         }
+
+        if selectedSymbol != nil {
+            updateDetail()
+        }
+    }
+
+    /// Toggle the inline detail chart for a row.
+    private func toggleSelect(_ item: WatchItem) {
+        let sym = item.normalizedSymbol
+        selectedSymbol = (selectedSymbol == sym) ? nil : sym
+        for (k, row) in rowViews { row.isSelected = (k == selectedSymbol) }
+        relocateDetail()
+        if selectedSymbol != nil { updateDetail() }
+        onSelectRow?(selectedSymbol == nil ? nil : item)
+        onLayoutChanged?()
+    }
+
+    /// Detach the detail container, then re-insert it right below the selected row.
+    private func relocateDetail() {
+        if detailContainer.superview != nil {
+            rowsStack.removeArrangedSubview(detailContainer)
+            detailContainer.removeFromSuperview()
+        }
+        guard let sym = selectedSymbol, let row = rowViews[sym] else { return }
+        let arranged = rowsStack.arrangedSubviews
+        guard let idx = arranged.firstIndex(of: row) else { return }
+        rowsStack.insertArrangedSubview(detailContainer, at: idx + 1)
+        if detailWidthConstraint == nil {
+            detailWidthConstraint = detailContainer.widthAnchor.constraint(equalTo: rowsStack.widthAnchor)
+        }
+        detailWidthConstraint?.isActive = true
+    }
+
+    /// Fill the detail title/subtitle/chart from the latest snapshot.
+    private func updateDetail() {
+        guard let sym = selectedSymbol,
+              let item = items.first(where: { $0.normalizedSymbol == sym })
+        else { return }
+        let q = quotes[sym]
+        let pts = minutes[sym] ?? []
+
+        let titleText: String
+        if !item.alias.isEmpty {
+            titleText = "\(item.alias)  \(item.code)"
+        } else if let q {
+            titleText = "\(q.name)  \(item.code)"
+        } else {
+            titleText = item.code
+        }
+        detailTitle.stringValue = titleText
+
+        if let q {
+            let pctStr = (q.pct >= 0 ? "+" : "-") + String(format: "%.2f%%", abs(q.pct))
+            detailSubtitle.stringValue = "\(formatPrice(q.price))   \(pctStr)   prev \(formatPrice(q.prevClose))"
+            let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
+            let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
+            detailSubtitle.textColor = q.pct > 0 ? neonRed : (q.pct < 0 ? neonGreen : .secondaryLabelColor)
+        } else {
+            detailSubtitle.stringValue = "n/a"
+            detailSubtitle.textColor = .secondaryLabelColor
+        }
+
+        detailChart.prevClose = q?.prevClose
+        detailChart.currentPrice = q?.price
+        detailChart.points = pts
+    }
+
+    private func formatPrice(_ v: Double) -> String {
+        return abs(v) < 100 ? String(format: "%.3f", v) : String(format: "%.2f", v)
     }
 
     private func rebuildRows(for items: [WatchItem]) {
@@ -336,7 +498,9 @@ final class DesktopCardView: NSView {
 
         for item in items {
             let row = WatchlistRowView(item: item)
-            // The desktop card is read-only: no click/drag/delete wiring.
+            // The desktop card supports click-to-expand the intraday chart, but
+            // no drag-reorder / delete wiring.
+            row.onClick = { [weak self] tapped in self?.toggleSelect(tapped) }
             row.translatesAutoresizingMaskIntoConstraints = false
             rowsStack.addArrangedSubview(row)
             NSLayoutConstraint.activate([
