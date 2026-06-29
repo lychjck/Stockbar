@@ -47,6 +47,7 @@ mkdir -p "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/StockBar"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+[[ -f "$ROOT/Resources/AppIcon.icns" ]] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc codesign so Gatekeeper / Launch Services don't reject the bundle.
 codesign --force --sign - --options runtime "$APP" 2>&1 | sed 's/^/    /'
