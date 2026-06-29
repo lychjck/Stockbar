@@ -63,6 +63,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let detailChart = ChartView(frame: NSRect(x: 0, y: 0, width: 360, height: 160))
     private let detailTitle = NSTextField(labelWithString: "")
     private let detailSubtitle = NSTextField(labelWithString: "")
+    private let detailStats = NSTextField(labelWithString: "")
 
     private var rowViews: [String: WatchlistRowView] = [:]   // key: normalizedSymbol
     private var detailWidthConstraint: NSLayoutConstraint?
@@ -177,6 +178,14 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         detailSubtitle.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.addSubview(detailSubtitle)
 
+        // Compact two-line stats grid (今开/最高/最低 · 振幅/量/额/换手/PE).
+        detailStats.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        detailStats.textColor = .secondaryLabelColor
+        detailStats.maximumNumberOfLines = 2
+        detailStats.lineBreakMode = .byWordWrapping
+        detailStats.translatesAutoresizingMaskIntoConstraints = false
+        detailContainer.addSubview(detailStats)
+
         detailChart.style = .full
         detailChart.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.addSubview(detailChart)
@@ -210,7 +219,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             rowsStack.trailingAnchor.constraint(equalTo: contentStack.trailingAnchor),
 
             // detailContainer is its own height when inserted into rowsStack.
-            detailContainer.heightAnchor.constraint(equalToConstant: 220),
+            detailContainer.heightAnchor.constraint(equalToConstant: 252),
 
             detailTitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 6),
             detailTitle.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 12),
@@ -218,7 +227,11 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             detailSubtitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 6),
             detailSubtitle.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -12),
 
-            detailChart.topAnchor.constraint(equalTo: detailTitle.bottomAnchor, constant: 4),
+            detailStats.topAnchor.constraint(equalTo: detailTitle.bottomAnchor, constant: 3),
+            detailStats.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 12),
+            detailStats.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -12),
+
+            detailChart.topAnchor.constraint(equalTo: detailStats.bottomAnchor, constant: 4),
             detailChart.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 4),
             detailChart.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -4),
             detailChart.bottomAnchor.constraint(equalTo: detailContainer.bottomAnchor, constant: -8),
@@ -265,7 +278,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// Updates the popover's contentSize so it animates to the new height.
     private func updatePopoverSize() {
         let rowsHeight = CGFloat(items.count) * 40
-        let detailHeight: CGFloat = (selectedSymbol == nil) ? 0 : 220
+        let detailHeight: CGFloat = (selectedSymbol == nil) ? 0 : 252
         let listIdeal = rowsHeight + detailHeight
         let screenAvail = (NSScreen.main?.visibleFrame.height ?? 900) * 0.85
         let addBarHeight: CGFloat = isAddBarVisible ? 36 : 0
@@ -522,8 +535,10 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
             let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
             detailSubtitle.textColor = q.pct > 0 ? neonRed : (q.pct < 0 ? neonGreen : .secondaryLabelColor)
+            detailStats.stringValue = Self.statsText(for: q)
         } else {
             detailSubtitle.stringValue = "n/a"
+            detailStats.stringValue = ""
         }
 
         detailChart.prevClose = q?.prevClose
@@ -533,6 +548,34 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
     private func formatPrice(_ v: Double) -> String {
         return abs(v) < 100 ? String(format: "%.3f", v) : String(format: "%.2f", v)
+    }
+
+    /// Build the two-line stats string shown under the price.
+    /// Line 1: 今开 / 最高 / 最低.  Line 2: 振幅 / 量 / 额 (+ 换手 / PE when present).
+    private static func statsText(for q: Quote) -> String {
+        func price(_ v: Double) -> String { abs(v) < 100 ? String(format: "%.3f", v) : String(format: "%.2f", v) }
+        let line1 = "今开 \(price(q.open))   最高 \(price(q.high))   最低 \(price(q.low))"
+        var line2 = "振幅 \(String(format: "%.2f%%", q.amplitude))   量 \(formatVolume(q.volume))   额 \(formatAmount(q.amount))"
+        if !q.isIndex, let t = q.turnoverRate, t > 0 {
+            line2 += "   换手 \(String(format: "%.2f%%", t))"
+        }
+        if !q.isIndex, let pe = q.pe, pe > 0 {
+            line2 += "   PE \(String(format: "%.1f", pe))"
+        }
+        return line1 + "\n" + line2
+    }
+
+    /// 成交量 in 手 (lots) → 万手 / 亿手.
+    private static func formatVolume(_ lots: Double) -> String {
+        if lots >= 1e8 { return String(format: "%.2f亿手", lots / 1e8) }
+        if lots >= 1e4 { return String(format: "%.1f万手", lots / 1e4) }
+        return String(format: "%.0f手", lots)
+    }
+
+    /// 成交额 in 万元 → 亿元 / 万元.
+    private static func formatAmount(_ wan: Double) -> String {
+        if wan >= 1e4 { return String(format: "%.2f亿", wan / 1e4) }
+        return String(format: "%.0f万", wan)
     }
 
     // MARK: - Add bar
