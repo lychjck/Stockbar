@@ -72,6 +72,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         root.material = .popover
         root.blendingMode = .behindWindow
         root.state = .active
+        root.appearance = NSAppearance(named: .vibrantDark) // Force dark mode for neon aesthetic
         root.wantsLayer = true
         self.view = root
 
@@ -80,7 +81,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         headerBar.orientation = .horizontal
         headerBar.spacing = 8
         headerBar.alignment = .centerY
-        headerBar.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 6, right: 8)
+        headerBar.edgeInsets = NSEdgeInsets(top: 14, left: 20, bottom: 10, right: 16)
         headerBar.translatesAutoresizingMaskIntoConstraints = false
 
         headerLabel.font = NSFont.systemFont(ofSize: 11)
@@ -152,19 +153,19 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         detailContainer.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.wantsLayer = true
 
-        detailTitle.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        detailTitle.font = NSFont.systemFont(ofSize: 18, weight: .bold)
         detailTitle.textColor = .labelColor
         detailTitle.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.addSubview(detailTitle)
 
         // Use rounded tabular digits for the subtitle (price · pct · prev).
-        let subDesc = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let subDesc = NSFont.systemFont(ofSize: 13, weight: .semibold)
             .fontDescriptor
             .withDesign(.rounded)
-        if let d = subDesc, let f = NSFont(descriptor: d, size: 12) {
+        if let d = subDesc, let f = NSFont(descriptor: d, size: 13) {
             detailSubtitle.font = f
         } else {
-            detailSubtitle.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+            detailSubtitle.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
         }
         detailSubtitle.textColor = .secondaryLabelColor
         detailSubtitle.translatesAutoresizingMaskIntoConstraints = false
@@ -257,7 +258,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// (header + optional add-bar + N rows + optional inline detail), capped to 85% of screen.
     /// Updates the popover's contentSize so it animates to the new height.
     private func updatePopoverSize() {
-        let rowsHeight = CGFloat(items.count) * 32
+        let rowsHeight = CGFloat(items.count) * 40
         let detailHeight: CGFloat = (selectedSymbol == nil) ? 0 : 220
         let listIdeal = rowsHeight + detailHeight
         let screenAvail = (NSScreen.main?.visibleFrame.height ?? 900) * 0.85
@@ -271,7 +272,12 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         let newSize = NSSize(width: width, height: total)
         preferredContentSize = newSize
         if let pop = popover, pop.contentSize != newSize {
-            pop.contentSize = newSize
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.25
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                pop.contentSize = newSize
+            })
         }
         var f = view.frame
         f.size = newSize
@@ -354,11 +360,16 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             row.isSelected = (k == selectedSymbol)
         }
         // Insert / remove the inline detail view in the rows stack.
-        relocateDetailContainer()
-        onSelectionChanged?(selectedSymbol == nil ? nil : item)
-        // reload() will recompute popover size; the popover grows to include the
-        // detail block so the selected row stays visible without manual scrolling.
-        reload()
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.25
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            relocateDetailContainer()
+            onSelectionChanged?(selectedSymbol == nil ? nil : item)
+            // reload() will recompute popover size; the popover grows to include the
+            // detail block so the selected row stays visible without manual scrolling.
+            reload()
+        })
     }
 
     /// Move (or remove) `detailContainer` so it sits immediately after the selected row.
@@ -501,7 +512,10 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         if let q {
             let pctStr = (q.pct >= 0 ? "+" : "-") + String(format: "%.2f%%", abs(q.pct))
             detailSubtitle.stringValue = "\(formatPrice(q.price))   \(pctStr)   prev \(formatPrice(q.prevClose))"
-            detailSubtitle.textColor = q.pct > 0 ? .systemRed : (q.pct < 0 ? .systemGreen : .secondaryLabelColor)
+            
+            let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
+            let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
+            detailSubtitle.textColor = q.pct > 0 ? neonRed : (q.pct < 0 ? neonGreen : .secondaryLabelColor)
         } else {
             detailSubtitle.stringValue = "n/a"
         }

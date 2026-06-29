@@ -32,16 +32,16 @@ final class WatchlistRowView: NSView {
     private let aliasLabel = NSTextField(labelWithString: "")
     private let codeLabel = NSTextField(labelWithString: "")
     private let priceLabel = NSTextField(labelWithString: "")
-    private let pctLabel = NSTextField(labelWithString: "")
+    private let pctBadge = PillBadge()
     private let sparkline = ChartView(frame: .zero)
 
     init(item: WatchItem) {
         self.item = item
-        super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 32))
+        super.init(frame: NSRect(x: 0, y: 0, width: 380, height: 40))
         wantsLayer = true
         sparkline.style = .mini
 
-        for field in [aliasLabel, codeLabel, priceLabel, pctLabel] {
+        for field in [aliasLabel, codeLabel, priceLabel] {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.drawsBackground = false
             field.isBezeled = false
@@ -51,45 +51,49 @@ final class WatchlistRowView: NSView {
             field.lineBreakMode = .byTruncatingTail
             addSubview(field)
         }
+        pctBadge.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pctBadge)
+
         // Alias uses the system font (semibold) — letters mix with CJK best.
-        aliasLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        aliasLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
         // Code is small + secondary.
         codeLabel.textColor = .secondaryLabelColor
-        codeLabel.font = Self.monoFont(size: 11, weight: .regular)
+        codeLabel.font = Self.monoFont(size: 12, weight: .medium)
         // Numbers use the rounded design so they look more modern + match Stocks app.
-        priceLabel.font = Self.roundedDigitFont(size: 13, weight: .medium)
-        pctLabel.font = Self.roundedDigitFont(size: 13, weight: .semibold)
+        priceLabel.font = Self.roundedDigitFont(size: 15, weight: .semibold)
+        
+        pctBadge.label.font = Self.roundedDigitFont(size: 13, weight: .bold)
 
         sparkline.translatesAutoresizingMaskIntoConstraints = false
         addSubview(sparkline)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 32),
+            heightAnchor.constraint(equalToConstant: 40),
 
-            aliasLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            aliasLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             aliasLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            aliasLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 90),
+            aliasLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 95),
 
             codeLabel.leadingAnchor.constraint(equalTo: aliasLabel.trailingAnchor, constant: 8),
             codeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             codeLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 60),
 
             // Sparkline pinned to the right; before it: pct + price (right-aligned)
-            sparkline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            sparkline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             sparkline.centerYAnchor.constraint(equalTo: centerYAnchor),
-            sparkline.widthAnchor.constraint(equalToConstant: 70),
-            sparkline.heightAnchor.constraint(equalToConstant: 20),
+            sparkline.widthAnchor.constraint(equalToConstant: 80),
+            sparkline.heightAnchor.constraint(equalToConstant: 28),
 
-            pctLabel.trailingAnchor.constraint(equalTo: sparkline.leadingAnchor, constant: -10),
-            pctLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pctLabel.widthAnchor.constraint(equalToConstant: 64),
+            pctBadge.trailingAnchor.constraint(equalTo: sparkline.leadingAnchor, constant: -12),
+            pctBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pctBadge.widthAnchor.constraint(equalToConstant: 68),
+            pctBadge.heightAnchor.constraint(equalToConstant: 24),
 
-            priceLabel.trailingAnchor.constraint(equalTo: pctLabel.leadingAnchor, constant: -10),
+            priceLabel.trailingAnchor.constraint(equalTo: pctBadge.leadingAnchor, constant: -12),
             priceLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            priceLabel.widthAnchor.constraint(equalToConstant: 64),
+            priceLabel.widthAnchor.constraint(equalToConstant: 68),
         ])
         priceLabel.alignment = .right
-        pctLabel.alignment = .right
 
         applyContent()
     }
@@ -136,10 +140,20 @@ final class WatchlistRowView: NSView {
 
         if let q = quote {
             priceLabel.stringValue = formatPrice(q.price)
-            pctLabel.stringValue = formatPct(q.pct)
-            // CN convention: red up, green down.
-            let color: NSColor = q.pct > 0 ? .systemRed : (q.pct < 0 ? .systemGreen : .secondaryLabelColor)
-            pctLabel.textColor = color
+            pctBadge.label.stringValue = formatPct(q.pct)
+            
+            // Custom high-vibrancy colors for dark mode glassmorphism
+            let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
+            let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
+            
+            let isUp = q.pct > 0
+            let isDown = q.pct < 0
+            let fgColor: NSColor = isUp ? neonRed : (isDown ? neonGreen : .secondaryLabelColor)
+            let bgColor: NSColor = isUp ? neonRed.withAlphaComponent(0.2) : (isDown ? neonGreen.withAlphaComponent(0.2) : .clear)
+            
+            pctBadge.label.textColor = fgColor
+            pctBadge.layer?.backgroundColor = bgColor.cgColor
+            
             priceLabel.textColor = .labelColor
             toolTip = "high \(formatPrice(q.high)) · low \(formatPrice(q.low)) · prev \(formatPrice(q.prevClose))"
             // Keep the sparkline's color in sync with the live pct — pass the
@@ -148,8 +162,9 @@ final class WatchlistRowView: NSView {
             sparkline.currentPrice = q.price
         } else {
             priceLabel.stringValue = "—"
-            pctLabel.stringValue = "—"
-            pctLabel.textColor = .secondaryLabelColor
+            pctBadge.label.stringValue = "—"
+            pctBadge.label.textColor = .secondaryLabelColor
+            pctBadge.layer?.backgroundColor = NSColor.clear.cgColor
             toolTip = nil
             sparkline.currentPrice = nil
         }
@@ -164,25 +179,36 @@ final class WatchlistRowView: NSView {
         return "\(s)\(String(format: "%.2f", abs(v)))%"
     }
 
-    // MARK: - Selection / hover background
-
     override func draw(_ dirtyRect: NSRect) {
-        // Slightly inset rounded "capsule" highlight when selected/hovering — this
-        // looks calmer than a full-bleed fill.
-        let inset = NSRect(
-            x: bounds.minX + 4,
-            y: bounds.minY + 2,
-            width: bounds.width - 8,
-            height: bounds.height - 4
-        )
-        let path = NSBezierPath(roundedRect: inset, xRadius: 6, yRadius: 6)
+        // We use CALayer for smooth hover animations, but still custom draw the selection if needed.
+        // Actually, let's just draw the background entirely using CoreAnimation via updateLayer() for smoothness.
+    }
+    
+    override var wantsUpdateLayer: Bool { true }
+    
+    override func updateLayer() {
+        guard let layer = self.layer else { return }
+        
+        let targetBg: NSColor
         if isSelected {
-            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.28).setFill()
-            path.fill()
+            targetBg = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.25)
         } else if isHovering {
-            NSColor.unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.55).setFill()
-            path.fill()
+            targetBg = NSColor.unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.4)
+        } else {
+            targetBg = .clear
         }
+        
+        layer.cornerRadius = 8
+        
+        // Add a smooth transition for the background color change
+        let animation = CABasicAnimation(keyPath: "backgroundColor")
+        animation.fromValue = layer.backgroundColor
+        animation.toValue = targetBg.cgColor
+        animation.duration = 0.15
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        
+        layer.backgroundColor = targetBg.cgColor
+        layer.add(animation, forKey: "bgAnim")
     }
 
     private var isHovering: Bool = false
@@ -265,4 +291,27 @@ final class WatchlistRowView: NSView {
 
     private var dragStartLocation: NSPoint?
     private var isDragging: Bool = false
+}
+
+final class PillBadge: NSView {
+    let label = NSTextField(labelWithString: "")
+    
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.drawsBackground = false
+        label.isBezeled = false
+        label.isEditable = false
+        label.alignment = .center
+        addSubview(label)
+        
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError() }
 }

@@ -104,8 +104,10 @@ final class ChartView: NSView {
         } else {
             isUp = latest >= (prices.first ?? latest)
         }
-        // CN convention: red up, green down.
-        let lineColor: NSColor = isUp ? .systemRed : .systemGreen
+        // Custom high-vibrancy colors for dark mode glassmorphism
+        let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0) // #ff453a
+        let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0) // #32d74b
+        let lineColor: NSColor = isUp ? neonRed : neonGreen
 
         if style == .full {
             drawFullDecorations(plot: plot, lo: lo, hi: hi, prevClose: prevClose)
@@ -157,29 +159,25 @@ final class ChartView: NSView {
             ctx.restoreGState()
         }
 
-        // -- Soft glow under the line (full mode) --
-        if style == .full, let ctx = NSGraphicsContext.current?.cgContext {
+        // -- Glow under the line --
+        if let ctx = NSGraphicsContext.current?.cgContext {
             ctx.saveGState()
-            ctx.setShadow(offset: CGSize(width: 0, height: -1),
-                          blur: 4,
-                          color: lineColor.withAlphaComponent(0.35).cgColor)
+            // Drop shadow for the neon glow effect
+            let blurRadius: CGFloat = (style == .mini ? 3 : 6)
+            ctx.setShadow(offset: CGSize(width: 0, height: 0),
+                          blur: blurRadius,
+                          color: lineColor.withAlphaComponent(0.6).cgColor)
             lineColor.setStroke()
-            path.lineWidth = 1.6
+            path.lineWidth = (style == .mini ? 2.0 : 3.0)
             path.lineJoinStyle = .round
             path.lineCapStyle = .round
             path.stroke()
             ctx.restoreGState()
-        } else {
-            lineColor.setStroke()
-            path.lineWidth = (style == .mini ? 1.2 : 1.4)
-            path.lineJoinStyle = .round
-            path.lineCapStyle = .round
-            path.stroke()
         }
 
         // -- Pulsing end-dot at the latest point --
         // A small filled dot with a faint outer halo, like the Apple Stocks app.
-        let dotRadius: CGFloat = (style == .mini ? 2.4 : 3.2)
+        let dotRadius: CGFloat = (style == .mini ? 3.0 : 4.5)
         let haloRadius = dotRadius * 2.4
         let halo = NSBezierPath(
             ovalIn: NSRect(
@@ -277,10 +275,12 @@ final class ChartView: NSView {
                 .font: NSFont.systemFont(ofSize: 9),
                 .foregroundColor: NSColor.secondaryLabelColor
             ]
+            let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
+            let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
             for (text, ry, color) in [
-                (topPct, 1.0, NSColor.systemRed),
+                (topPct, 1.0, neonRed),
                 (mid,    yRel, NSColor.secondaryLabelColor),
-                (botPct, 0.0, NSColor.systemGreen)
+                (botPct, 0.0, neonGreen)
             ] as [(String, Double, NSColor)] {
                 var attrs = labelAttrs
                 attrs[.foregroundColor] = color
