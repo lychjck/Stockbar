@@ -43,24 +43,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var minuteTimer: Timer?
     private var fileWatcher: DispatchSourceFileSystemObject?
 
+    // Status-bar display preference.
+    // mode: "icon" (just the SF Symbol) or "symbol" (a pinned watch item's
+    // alias + percent change rendered as text). `statusSymbol` holds the
+    // pinned item's normalized symbol. Stored in UserDefaults (not the shared
+    // watchlist.json) so we never pollute the file shared with `stockline`.
+    private let statusModeKey = "StatusBar.mode"
+    private let statusSymbolKey = "StatusBar.symbol"
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         watchlist = store.load()
 
-        // ---- Status item: single icon, no text.
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // ---- Status item: icon or a pinned symbol's text, no fixed width.
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(
-                systemSymbolName: "chart.line.uptrend.xyaxis",
-                accessibilityDescription: "StockBar"
-            )
-            button.image?.isTemplate = true
             button.target = self
             button.action = #selector(togglePopover(_:))
             // Catch right-click separately if needed; left-click toggles popover.
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+        updateStatusItemDisplay()
 
         // ---- Popover
         popover.contentViewController = popoverController
@@ -144,6 +148,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     @objc private func togglePopover(_ sender: AnyObject?) {
         guard let button = statusItem.button else { return }
+        // buttonNumber 1 = right-click; anything else = left-click.
+        if NSApp.currentEvent?.buttonNumber == 1 {
+            showStatusMenu()
+            return
+        }
         if popover.isShown {
             popover.performClose(sender)
         } else {
@@ -263,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 pushDataToController()
             }
             pushDataToCard()
+            updateStatusItemDisplay()
         } catch {
             // Keep stale quotes; mark in tooltip.
             statusItem.button?.toolTip = "Last fetch failed: \(error)"
@@ -327,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             minutes.removeValue(forKey: sym)
             pushDataToController()
             pushDataToCard()
+            updateStatusItemDisplay()
         } catch {
             statusItem.button?.toolTip = "Failed to remove: \(error)"
         }
@@ -342,6 +353,107 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } catch {
             statusItem.button?.toolTip = "Failed to reorder: \(error)"
         }
+    }
+
+    // MARK: - Status-bar display (icon vs pinned symbol)
+
+    private let upRed = NSColor(calibratedRed: 0.90, green: 0.25, blue: 0.20, alpha: 1.0)
+    private let downGreen = NSColor(calibratedRed: 0.20, green: 0.72, blue: 0.30, alpha: 1.0)
+
+    /// Render the status-bar button per the saved preference: either the SF
+    /// Symbol icon, or a pinned watch item's "alias +1.23%" text (red up /
+    /// green down, CN convention). Falls back to the icon if the pinned symbol
+    /// is missing or has no quote yet.
+    private func updateStatusItemDisplay() {
+        guard let button = statusItem.button else { return }
+        let mode = UserDefaults.standard.string(forKey: statusModeKey) ?? "icon"
+        let pinned = UserDefaults.standard.string(forKey: statusSymbolKey)
+
+        if mode == "symbol",
+           let sym = pinned,
+           let item = watchlist.activeItems.first(where: { $0.normalizedSymbol == sym }) {
+            let label = item.alias.isEmpty ? (quotes[sym]?.name ?? item.code) : item.alias
+            if let q = quotes[sym] {
+                let pctStr = (q.pct >= 0 ? "+" : "") + String(format: "%.2f%%", q.pct)
+                let color: NSColor = q.pct > 0 ? upRed : (q.pct < 0 ? downGreen : .labelColor)
+                button.image = nil
+                button.attributedTitle = NSAttributedString(
+                    string: "\(label) \(pctStr)",
+                    attributes: [
+                        .foregroundColor: color,
+                        .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                    ]
+                )
+            } else {
+                // No quote yet — show the bare label so the user still sees their pick.
+                button.image = nil
+                button.title = label
+            }
+            return
+        }
+
+        // Default: icon only.
+        button.title = ""
+        button.attributedTitle = NSAttributedString(string: "")
+        let icon = NSImage(systemSymbolName: "chart.line.uptrend.xyaxis",
+                           accessibilityDescription: "StockBar")
+        icon?.isTemplate = true
+        button.image = icon
+    }
+
+    /// Pop up the right-click configuration menu under the status item.
+    private func showStatusMenu() {
+        let menu = buildStatusMenu()
+        guard let button = statusItem.button else { return }
+        let origin = NSPoint(x: 0, y: button.bounds.height + 4)
+        menu.popUp(positioning: nil, at: origin, in: button)
+    }
+
+    /// Build the "菜单栏显示" menu: an icon-only option plus one row per watch
+    /// item, with a checkmark on the current selection.
+    private func buildStatusMenu() -> NSMenu {
+        let menu = NSMenu()
+        let mode = UserDefaults.standard.string(forKey: statusModeKey) ?? "icon"
+        let pinned = UserDefaults.standard.string(forKey: statusSymbolKey)
+
+        let header = NSMenuItem(title: "菜单栏显示", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+
+        let iconItem = NSMenuItem(title: "仅显示图标",
+                                  action: #selector(selectStatusIcon),
+                                  keyEquivalent: "")
+        iconItem.target = self
+        iconItem.state = (mode == "icon") ? .on : .off
+        menu.addItem(iconItem)
+
+        menu.addItem(.separator())
+
+        for item in watchlist.activeItems {
+            let sym = item.normalizedSymbol
+            let label = item.alias.isEmpty ? (quotes[sym]?.name ?? item.code) : item.alias
+            let mi = NSMenuItem(title: "\(label)  \(item.code)",
+                                action: #selector(selectStatusSymbol(_:)),
+                                keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = sym
+            mi.state = (mode == "symbol" && pinned == sym) ? .on : .off
+            menu.addItem(mi)
+        }
+
+        return menu
+    }
+
+    @objc private func selectStatusIcon() {
+        UserDefaults.standard.set("icon", forKey: statusModeKey)
+        updateStatusItemDisplay()
+    }
+
+    @objc private func selectStatusSymbol(_ sender: NSMenuItem) {
+        guard let sym = sender.representedObject as? String else { return }
+        UserDefaults.standard.set("symbol", forKey: statusModeKey)
+        UserDefaults.standard.set(sym, forKey: statusSymbolKey)
+        updateStatusItemDisplay()
     }
 
     // MARK: - Open config file
