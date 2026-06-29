@@ -69,7 +69,30 @@ struct Quote {
     let low: Double
     let time: String        // raw "YYYYMMDDHHmmss"
 
+    // Extended fields (may be 0/nil for indices or instruments that don't
+    // report them). Parsed relative to the "price/volume/amount" anchor field
+    // so they line up across stocks / ETFs / indices alike.
+    let open: Double            // 今开
+    let volume: Double          // 成交量 (手 / lots)
+    let amount: Double          // 成交额 (万元 / 10k CNY)
+    let turnoverRate: Double?   // 换手率 % (nil for indices)
+    let pe: Double?             // 市盈率 TTM (nil for ETFs / indices)
+
     var displayName: String { name }
+
+    /// True for broad-market indices (上证指数 sh000xxx, 深证成指/创业板 sz399xxx,
+    /// etc.). They don't report a meaningful 换手率 / 市盈率, so callers should
+    /// skip those fields rather than show whatever sits in those slots.
+    var isIndex: Bool {
+        symbol.hasPrefix("sh000") || symbol.hasPrefix("sz399")
+    }
+
+    /// 振幅 % = (最高 - 最低) / 昨收 * 100. Computed so it never relies on a
+    /// brittle field index.
+    var amplitude: Double {
+        guard prevClose > 0 else { return 0 }
+        return (high - low) / prevClose * 100
+    }
 }
 
 /// One point on the today-only minute-level chart.

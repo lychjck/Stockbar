@@ -51,10 +51,22 @@ final class QuoteFetcher {
 
     /// Parse Tencent quote text. Each line looks like:
     ///   v_sh000001="1~上证指数~000001~3000.00~3010.00~...";
-    /// Field indexes (1-based in raw spec, here 0-based after split):
-    ///   1: name, 2: code, 3: price, 4: prev_close,
-    ///   30: time (YYYYMMDDhhmmss), 31: change, 32: pct,
-    ///   33: high, 34: low
+    ///
+    /// Fixed-position fields (0-based after splitting on `~`):
+    ///   1: name, 2: code, 3: price, 4: prev_close, 5: open
+    ///
+    /// The remaining fields (change / pct / high / low / volume / amount /
+    /// turnover / PE) sit at *different* absolute indices depending on the
+    /// instrument type — indices (上证指数 …) carry an extra "沪股通/深股通"
+    /// block that shifts everything by one versus regular stocks / ETFs.
+    /// Hard-coding `parts[32]` therefore mis-reads every index (e.g. 上证指数
+    /// would show its 涨跌额 as the 涨跌幅).
+    ///
+    /// Instead we anchor on the one field whose format is stable across all
+    /// types: the "price/volume/amount" combo (e.g. "4116.95/38158261/45713…").
+    /// Call its index K; then for both stocks and indices:
+    ///   change = K-4, pct = K-3, high = K-2, low = K-1,
+    ///   volume = K+1 (手), amount = K+2 (万元), turnover = K+3 (%), PE = K+4
     static func parse(_ text: String) -> [Quote] {
         var result: [Quote] = []
         // Match assignments: v_<symbol>="..."
@@ -69,15 +81,30 @@ final class QuoteFetcher {
             let symbol = ns.substring(with: m.range(at: 1))
             let payload = ns.substring(with: m.range(at: 2))
             let parts = payload.components(separatedBy: "~")
-            if parts.count < 35 { continue }
+            if parts.count < 6 { continue }
             guard
                 let price = Double(parts[3]),
-                let prevClose = Double(parts[4]),
-                let pct = Double(parts[32]),
-                let high = Double(parts[33]),
-                let low = Double(parts[34])
+                let prevClose = Double(parts[4])
             else { continue }
-            let change: Double = Double(parts[31]) ?? (price - prevClose)
+
+            // Locate the "price/volume/amount" anchor: the first field that
+            // splits into 3 numeric segments whose first segment matches price.
+            guard let k = anchorIndex(in: parts, price: price) else { continue }
+
+            // Defensive bounds: we need K-4 … K+4 to exist.
+            guard k >= 5, k + 2 < parts.count else { continue }
+
+            let change = Double(parts[k - 4]) ?? (price - prevClose)
+            let pct = Double(parts[k - 3]) ?? 0
+            let high = Double(parts[k - 2]) ?? price
+            let low = Double(parts[k - 1]) ?? price
+            let time = parts[k - 5]
+            let open = Double(parts[5]) ?? prevClose
+            let volume = Double(parts[k + 1]) ?? 0
+            let amount = Double(parts[k + 2]) ?? 0
+            let turnover = (k + 3 < parts.count) ? Double(parts[k + 3]) : nil
+            let pe = (k + 4 < parts.count) ? Double(parts[k + 4]) : nil
+
             let q = Quote(
                 symbol: symbol,
                 code: parts[2].isEmpty ? String(symbol.dropFirst(2)) : parts[2],
@@ -88,10 +115,33 @@ final class QuoteFetcher {
                 pct: pct,
                 high: high,
                 low: low,
-                time: parts.count > 30 ? parts[30] : ""
+                time: time,
+                open: open,
+                volume: volume,
+                amount: amount,
+                turnoverRate: turnover,
+                pe: pe
             )
             result.append(q)
         }
         return result
+    }
+
+    /// Find the index of the "price/volume/amount" combo field. It is the field
+    /// that contains exactly two '/' separators and whose first segment equals
+    /// the current price (within rounding). Searched from index 6 onward to skip
+    /// the leading name/code/price block.
+    private static func anchorIndex(in parts: [String], price: Double) -> Int? {
+        for i in 6..<parts.count {
+            let field = parts[i]
+            guard field.contains("/") else { continue }
+            let segs = field.components(separatedBy: "/")
+            guard segs.count == 3, let first = Double(segs[0]) else { continue }
+            // First segment is the price; allow tiny rounding differences.
+            if abs(first - price) < 0.0001 || first == price {
+                return i
+            }
+        }
+        return nil
     }
 }
