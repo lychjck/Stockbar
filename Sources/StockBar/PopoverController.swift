@@ -46,6 +46,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let quitButton = NSButton()
     private let addToggleButton = NSButton()
     private let desktopCardButton = NSButton()
+    private let resizeHandle = WidthResizeHandleView()
 
     // ---- Add bar (collapsible row below header)
     private let addBar = NSStackView()
@@ -68,12 +69,28 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private var rowViews: [String: WatchlistRowView] = [:]   // key: normalizedSymbol
     private var detailWidthConstraint: NSLayoutConstraint?
 
+    private static let widthKey = "StockBar.panelWidth"
+    private static let defaultWidth: CGFloat = 520
+    private static let minWidth: CGFloat = 420
+    private static let maxWidth: CGFloat = 760
+
+    static var savedPanelWidth: CGFloat {
+        let raw = UserDefaults.standard.double(forKey: widthKey)
+        let value = raw > 0 ? CGFloat(raw) : defaultWidth
+        return min(max(value, minWidth), maxWidth)
+    }
+
+    static func savePanelWidth(_ width: CGFloat) {
+        let clamped = min(max(width, minWidth), maxWidth)
+        UserDefaults.standard.set(Double(clamped), forKey: widthKey)
+    }
+
     // MARK: - View lifecycle
 
     override func loadView() {
         // Use a vibrant blurred background so the popover blends with the
         // system menu bar / desktop wallpaper.
-        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 380, height: 480))
+        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: Self.savedPanelWidth, height: 480))
         root.material = .popover
         root.blendingMode = .behindWindow
         root.state = .active
@@ -153,6 +170,14 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         scrollView.documentView = contentStack
         root.addSubview(scrollView)
 
+        resizeHandle.translatesAutoresizingMaskIntoConstraints = false
+        resizeHandle.toolTip = "拖动调整宽度"
+        resizeHandle.currentWidth = { Self.savedPanelWidth }
+        resizeHandle.onWidthChanged = { [weak self] width in
+            self?.setPanelWidth(width)
+        }
+        root.addSubview(resizeHandle)
+
         // ---- Detail area (chart for the selected row).
         // It lives as an *inline* arranged subview inserted into rowsStack right
         // after the selected row. Not retained anywhere else — it's only attached
@@ -209,6 +234,11 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            resizeHandle.topAnchor.constraint(equalTo: root.topAnchor),
+            resizeHandle.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            resizeHandle.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            resizeHandle.widthAnchor.constraint(equalToConstant: 8),
 
             contentStack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             contentStack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
@@ -287,7 +317,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         let listMax = max(120, screenAvail - chrome)
         let listClamp = min(listIdeal, listMax)
         let total = chrome + max(listClamp, 28)
-        let width: CGFloat = 380
+        let width = Self.savedPanelWidth
         let newSize = NSSize(width: width, height: total)
         preferredContentSize = newSize
         if let pop = popover, pop.contentSize != newSize {
@@ -301,6 +331,11 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         var f = view.frame
         f.size = newSize
         view.frame = f
+    }
+
+    private func setPanelWidth(_ width: CGFloat) {
+        Self.savePanelWidth(width)
+        updatePopoverSize()
     }
 
     /// Update only the header (used when you don't have new data yet but time ticked).
@@ -699,4 +734,26 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 /// bottom of the row, which makes `scrollToVisible` behave unexpectedly.
 final class FlippedClipView: NSClipView {
     override var isFlipped: Bool { true }
+}
+
+final class WidthResizeHandleView: NSView {
+    var currentWidth: (() -> CGFloat)?
+    var onWidthChanged: ((CGFloat) -> Void)?
+
+    private var dragStartX: CGFloat = 0
+    private var dragStartWidth: CGFloat = 0
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartX = event.locationInWindow.x
+        dragStartWidth = currentWidth?() ?? 520
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let dx = event.locationInWindow.x - dragStartX
+        onWidthChanged?(dragStartWidth + dx)
+    }
 }

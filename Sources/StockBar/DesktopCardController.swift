@@ -13,8 +13,8 @@ final class DesktopCardController {
     private static let visibleKey = "desktopCard.visible"
     private static let originKey  = "desktopCard.origin"   // "x,y"
 
-    /// Fixed card width — matches `WatchlistRowView`'s natural layout (380pt).
-    static let cardWidth: CGFloat = 380
+    /// Card width follows the same persisted panel width used by the popover.
+    static var cardWidth: CGFloat { PopoverController.savedPanelWidth }
 
     private var window: DesktopCardWindow?
     private let cardView = DesktopCardView()
@@ -43,6 +43,11 @@ final class DesktopCardController {
         }
         cardView.onSelectRow = { [weak self] item in
             self?.onSelectRow?(item)
+        }
+        cardView.onWidthChanged = { [weak self] _ in
+            guard let self, let window = self.window else { return }
+            self.resizeToFit(window)
+            self.saveOrigin(window.frame.origin)
         }
     }
 
@@ -149,8 +154,10 @@ final class DesktopCardController {
     private func resizeToFit(_ window: NSWindow) {
         let targetHeight = cardView.preferredHeight()
         var frame = window.frame
-        guard abs(frame.height - targetHeight) > 0.5 else { return }
+        let targetWidth = Self.cardWidth
+        guard abs(frame.height - targetHeight) > 0.5 || abs(frame.width - targetWidth) > 0.5 else { return }
         let topY = frame.maxY
+        frame.size.width = targetWidth
         frame.size.height = targetHeight
         frame.origin.y = topY - targetHeight
         window.setFrame(frame, display: true, animate: false)
@@ -163,10 +170,16 @@ final class DesktopCardController {
     }
 
     private func savedOrigin() -> NSPoint? {
-        guard let s = UserDefaults.standard.string(forKey: Self.originKey) else { return nil }
+        guard let s = UserDefaults.standard.string(forKey: Self.originKey), !s.isEmpty else { return nil }
         let parts = s.split(separator: ",").compactMap { Double($0) }
         guard parts.count == 2 else { return nil }
-        return NSPoint(x: parts[0], y: parts[1])
+        let origin = NSPoint(x: parts[0], y: parts[1])
+        // Validate that the origin is within the union of all available screens.
+        // If not (e.g. external monitor disconnected), return nil so the window
+        // falls back to the default top-right position.
+        let visible = NSScreen.screens.map(\.visibleFrame).reduce(NSRect.null) { $0.union($1) }
+        guard visible.contains(origin) else { return nil }
+        return origin
     }
 }
 
@@ -195,11 +208,13 @@ final class DesktopCardView: NSView {
     /// Fired when the card's content height changes (row selected/deselected),
     /// so the controller can resize the window.
     var onLayoutChanged: (() -> Void)?
+    var onWidthChanged: ((CGFloat) -> Void)?
 
     private let header = HeaderDragView()
     private let titleLabel = NSTextField(labelWithString: "StockBar")
     private let statusLabel = NSTextField(labelWithString: "")
     private let closeButton = NSButton()
+    private let resizeHandle = WidthResizeHandleView()
     private let rowsStack = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: "暂无关注标的")
 
@@ -265,6 +280,14 @@ final class DesktopCardView: NSView {
         header.addSubview(closeButton)
         addSubview(header)
 
+        resizeHandle.translatesAutoresizingMaskIntoConstraints = false
+        resizeHandle.toolTip = "拖动调整宽度"
+        resizeHandle.currentWidth = { PopoverController.savedPanelWidth }
+        resizeHandle.onWidthChanged = { [weak self] width in
+            self?.setPanelWidth(width)
+        }
+        addSubview(resizeHandle)
+
         // ---- Rows.
         rowsStack.orientation = .vertical
         rowsStack.spacing = 0
@@ -281,8 +304,6 @@ final class DesktopCardView: NSView {
         addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: DesktopCardController.cardWidth),
-
             header.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -297,6 +318,11 @@ final class DesktopCardView: NSView {
 
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -14),
             closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+
+            resizeHandle.topAnchor.constraint(equalTo: topAnchor),
+            resizeHandle.trailingAnchor.constraint(equalTo: trailingAnchor),
+            resizeHandle.bottomAnchor.constraint(equalTo: bottomAnchor),
+            resizeHandle.widthAnchor.constraint(equalToConstant: 8),
 
             rowsStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: headerGap),
             rowsStack.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -363,6 +389,11 @@ final class DesktopCardView: NSView {
         let bodyRows = max(items.count, 1)   // empty state still reserves one row
         let detail = (selectedSymbol != nil) ? detailHeight : 0
         return topInset + headerHeight + headerGap + CGFloat(bodyRows) * rowHeight + detail + bottomInset
+    }
+
+    private func setPanelWidth(_ width: CGFloat) {
+        PopoverController.savePanelWidth(width)
+        onWidthChanged?(PopoverController.savedPanelWidth)
     }
 
     // Keep a copy so preferredHeight can read it.

@@ -37,7 +37,7 @@ final class WatchlistRowView: NSView {
 
     init(item: WatchItem) {
         self.item = item
-        super.init(frame: NSRect(x: 0, y: 0, width: 380, height: 40))
+        super.init(frame: NSRect(x: 0, y: 0, width: 520, height: 40))
         wantsLayer = true
         sparkline.style = .mini
 
@@ -72,11 +72,11 @@ final class WatchlistRowView: NSView {
 
             aliasLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             aliasLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            aliasLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 95),
 
             codeLabel.leadingAnchor.constraint(equalTo: aliasLabel.trailingAnchor, constant: 8),
             codeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            codeLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 60),
+            codeLabel.widthAnchor.constraint(equalToConstant: 60),
+            codeLabel.trailingAnchor.constraint(lessThanOrEqualTo: priceLabel.leadingAnchor, constant: -12),
 
             // Sparkline pinned to the right; before it: pct + price (right-aligned)
             sparkline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
@@ -93,6 +93,8 @@ final class WatchlistRowView: NSView {
             priceLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             priceLabel.widthAnchor.constraint(equalToConstant: 68),
         ])
+        aliasLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        codeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         priceLabel.alignment = .right
 
         applyContent()

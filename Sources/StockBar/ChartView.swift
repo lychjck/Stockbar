@@ -73,12 +73,11 @@ final class ChartView: NSView {
             hi = lo + 1
         }
 
-        // Determine x-range: full trading day = 240 minutes; mini mode tightens to actual.
-        let xMax: Double
-        switch style {
-        case .full: xMax = 240
-        case .mini: xMax = max(Double(points.last?.minutesFromOpen ?? 0), 1)
-        }
+        // Determine x-range: full trading day = 240 minutes. The line then
+        // occupies as much horizontal space as time has actually progressed —
+        // narrow strip in early session, full width by close. Mini sparkline
+        // and full chart share the same mapping so their shapes match.
+        let xMax: Double = 240
 
         // Insets
         let insets: NSEdgeInsets
