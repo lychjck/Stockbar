@@ -37,6 +37,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.label")
     static let detailChartIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.chart")
+    static let detailPinIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.detail.pin")
     static let detailCloseIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.close")
     static let scrubberCellIdentifier =
@@ -66,6 +68,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private let detailLabel: NSTextField
     private let detailChartItem: NSCustomTouchBarItem
     private let detailChartView: TouchBarChartView
+    private let detailPinItem: NSCustomTouchBarItem
+    private let detailPinButton: NSButton
     private let detailCloseItem: NSCustomTouchBarItem
     private let detailCloseButton: NSButton
 
@@ -187,6 +191,20 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         detailChartItem = NSCustomTouchBarItem(identifier: Self.detailChartIdentifier)
         detailChartItem.view = detailChartView
 
+        detailPinButton = NSButton(title: "", target: nil, action: nil)
+        detailPinButton.image = NSImage(
+            systemSymbolName: "pin",
+            accessibilityDescription: "钉住到控制条"
+        )
+        detailPinButton.imagePosition = .imageOnly
+        detailPinButton.bezelStyle = .rounded
+        detailPinButton.isBordered = false
+        detailPinButton.contentTintColor = .secondaryLabelColor
+        detailPinButton.translatesAutoresizingMaskIntoConstraints = false
+        detailPinButton.setContentHuggingPriority(.required, for: .horizontal)
+        detailPinItem = NSCustomTouchBarItem(identifier: Self.detailPinIdentifier)
+        detailPinItem.view = detailPinButton
+
         detailCloseButton = NSButton(title: "", target: nil, action: nil)
         detailCloseButton.image = NSImage(
             systemSymbolName: "xmark.circle.fill",
@@ -205,6 +223,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
             Self.detailBackIdentifier,
             Self.detailLabelIdentifier,
             Self.detailChartIdentifier,
+            Self.detailPinIdentifier,
             Self.detailCloseIdentifier,
         ]
 
@@ -218,6 +237,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalCloseButton.action = #selector(handleModalCloseTap(_:))
         detailBackButton.target = self
         detailBackButton.action = #selector(handleDetailBackTap(_:))
+        detailPinButton.target = self
+        detailPinButton.action = #selector(handleDetailPinTap(_:))
         detailCloseButton.target = self
         detailCloseButton.action = #selector(handleDetailCloseTap(_:))
         scrubber.dataSource = self
@@ -234,6 +255,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         case Self.detailBackIdentifier:  return detailBackItem
         case Self.detailLabelIdentifier: return detailLabelItem
         case Self.detailChartIdentifier: return detailChartItem
+        case Self.detailPinIdentifier:   return detailPinItem
         case Self.detailCloseIdentifier: return detailCloseItem
         default: return nil
         }
@@ -436,6 +458,16 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
         detailChartView.quote = q
         detailChartView.points = currentMinutes[symbol] ?? []
+
+        // Reflect pin state on the button: filled pin if this symbol is the
+        // current Control Strip headline, hollow pin otherwise.
+        let pinned = UserDefaults.standard.string(forKey: Self.pinnedSymbolKey)
+        let isPinned = (pinned == symbol)
+        detailPinButton.image = NSImage(
+            systemSymbolName: isPinned ? "pin.fill" : "pin",
+            accessibilityDescription: isPinned ? "取消钉住" : "钉住到控制条"
+        )
+        detailPinButton.contentTintColor = isPinned ? upRed : .secondaryLabelColor
     }
 
     @objc private func handleDetailBackTap(_ sender: Any?) {
@@ -449,6 +481,27 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
             systemTrayItemIdentifier: Self.stripIdentifier
         )
         modalVisible = true
+    }
+
+    /// Toggle "pin to Control Strip" for the currently shown symbol.
+    /// Pinned stock is what the strip widget displays. Tapping pin again
+    /// (or pinning another stock) clears the previous one — only one
+    /// stock can be pinned at a time. Falling back to "no pin" reverts
+    /// the strip widget to the first watchlist item.
+    @objc private func handleDetailPinTap(_ sender: Any?) {
+        guard let sym = detailSymbol else { return }
+        let defaults = UserDefaults.standard
+        let current = defaults.string(forKey: Self.pinnedSymbolKey)
+        if current == sym {
+            defaults.removeObject(forKey: Self.pinnedSymbolKey)
+        } else {
+            defaults.set(sym, forKey: Self.pinnedSymbolKey)
+        }
+        // Refresh both surfaces so the change is immediate:
+        //   - the pin button on the detail bar flips fill/hollow
+        //   - the strip widget switches to / away from this symbol
+        refreshDetail(for: sym)
+        rebuildTrigger()
     }
 
     @objc private func handleDetailCloseTap(_ sender: Any?) {
