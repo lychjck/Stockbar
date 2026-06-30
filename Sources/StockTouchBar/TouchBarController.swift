@@ -31,6 +31,14 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.row")
     static let modalCloseIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.close")
+    static let detailBackIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.detail.back")
+    static let detailLabelIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.detail.label")
+    static let detailChartIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.detail.chart")
+    static let detailCloseIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.detail.close")
     static let scrubberCellIdentifier =
         NSUserInterfaceItemIdentifier("local.stocktouchbar.scrubber.cell")
 
@@ -41,7 +49,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private let stripItem: NSCustomTouchBarItem
     private let triggerButton: NSButton
 
-    // MARK: - Modal Touch Bar
+    // MARK: - Modal Touch Bar (list view)
 
     private let modalTouchBar = NSTouchBar()
     private let modalRowItem: NSCustomTouchBarItem
@@ -49,12 +57,35 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private let modalCloseButton: NSButton
     private let scrubber: NSScrubber
 
+    // MARK: - Detail Touch Bar (single-stock intraday chart)
+
+    private let detailTouchBar = NSTouchBar()
+    private let detailBackItem: NSCustomTouchBarItem
+    private let detailBackButton: NSButton
+    private let detailLabelItem: NSCustomTouchBarItem
+    private let detailLabel: NSTextField
+    private let detailChartItem: NSCustomTouchBarItem
+    private let detailChartView: TouchBarChartView
+    private let detailCloseItem: NSCustomTouchBarItem
+    private let detailCloseButton: NSButton
+
+    /// Notify AppDelegate that a cell was selected — used to fetch minute
+    /// data on demand. Called with the picked `WatchItem`.
+    var onSelectDetail: ((WatchItem) -> Void)?
+
     // MARK: - State
 
     private var currentItems: [WatchItem] = []
     private var currentQuotes: [String: Quote] = [:]
+    /// Cached minute series per normalized symbol. Pushed in by AppDelegate
+    /// via `updateMinutes`. Used to populate the chart in the detail view.
+    private var currentMinutes: [String: [MinutePoint]] = [:]
+    /// Symbol currently shown in the detail Touch Bar, if any. nil means we
+    /// are showing the list (or have closed entirely).
+    private var detailSymbol: String?
     private var installed = false
     private var modalVisible = false
+    private var detailVisible = false
 
     /// Every 2 s we re-set the strip widget's "presence" in the Control
     /// Strip. macOS 26 lets multiple third-party widgets share the strip
@@ -118,13 +149,77 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
             Self.modalCloseIdentifier,
         ]
 
+        // ---- Detail Touch Bar items.
+        detailBackButton = NSButton(title: "", target: nil, action: nil)
+        detailBackButton.image = NSImage(
+            systemSymbolName: "chevron.backward.circle.fill",
+            accessibilityDescription: "返回列表"
+        )
+        detailBackButton.imagePosition = .imageOnly
+        detailBackButton.bezelStyle = .rounded
+        detailBackButton.isBordered = false
+        detailBackButton.contentTintColor = .secondaryLabelColor
+        detailBackButton.translatesAutoresizingMaskIntoConstraints = false
+        detailBackButton.setContentHuggingPriority(.required, for: .horizontal)
+        detailBackItem = NSCustomTouchBarItem(identifier: Self.detailBackIdentifier)
+        detailBackItem.view = detailBackButton
+
+        detailLabel = NSTextField(labelWithString: "—")
+        detailLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        detailLabel.textColor = .labelColor
+        detailLabel.alignment = .left
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        detailLabelItem = NSCustomTouchBarItem(identifier: Self.detailLabelIdentifier)
+        detailLabelItem.view = detailLabel
+
+        detailChartView = TouchBarChartView(frame: NSRect(x: 0, y: 0, width: 720, height: 30))
+        detailChartView.upColor = upRed
+        detailChartView.downColor = downGreen
+        detailChartView.translatesAutoresizingMaskIntoConstraints = false
+        // Make chart greedy for horizontal space and let the other items
+        // (back / label / close) be sticky, so the chart absorbs all the
+        // leftover width in the Touch Bar app region.
+        detailChartView.setContentHuggingPriority(.init(50), for: .horizontal)
+        detailChartView.setContentCompressionResistancePriority(.init(50), for: .horizontal)
+        detailChartItem = NSCustomTouchBarItem(identifier: Self.detailChartIdentifier)
+        detailChartItem.view = detailChartView
+
+        detailCloseButton = NSButton(title: "", target: nil, action: nil)
+        detailCloseButton.image = NSImage(
+            systemSymbolName: "xmark.circle.fill",
+            accessibilityDescription: "收起"
+        )
+        detailCloseButton.imagePosition = .imageOnly
+        detailCloseButton.bezelStyle = .rounded
+        detailCloseButton.isBordered = false
+        detailCloseButton.contentTintColor = .secondaryLabelColor
+        detailCloseButton.translatesAutoresizingMaskIntoConstraints = false
+        detailCloseButton.setContentHuggingPriority(.required, for: .horizontal)
+        detailCloseItem = NSCustomTouchBarItem(identifier: Self.detailCloseIdentifier)
+        detailCloseItem.view = detailCloseButton
+
+        detailTouchBar.defaultItemIdentifiers = [
+            Self.detailBackIdentifier,
+            Self.detailLabelIdentifier,
+            Self.detailChartIdentifier,
+            Self.detailCloseIdentifier,
+        ]
+
         super.init()
 
         modalTouchBar.delegate = self
+        detailTouchBar.delegate = self
         triggerButton.target = self
         triggerButton.action = #selector(handleStripTap(_:))
         modalCloseButton.target = self
         modalCloseButton.action = #selector(handleModalCloseTap(_:))
+        detailBackButton.target = self
+        detailBackButton.action = #selector(handleDetailBackTap(_:))
+        detailCloseButton.target = self
+        detailCloseButton.action = #selector(handleDetailCloseTap(_:))
         scrubber.dataSource = self
         scrubber.delegate = self
     }
@@ -133,9 +228,15 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     func touchBar(_ touchBar: NSTouchBar,
                   makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
-        if identifier == Self.modalRowIdentifier { return modalRowItem }
-        if identifier == Self.modalCloseIdentifier { return modalCloseItem }
-        return nil
+        switch identifier {
+        case Self.modalRowIdentifier:    return modalRowItem
+        case Self.modalCloseIdentifier:  return modalCloseItem
+        case Self.detailBackIdentifier:  return detailBackItem
+        case Self.detailLabelIdentifier: return detailLabelItem
+        case Self.detailChartIdentifier: return detailChartItem
+        case Self.detailCloseIdentifier: return detailCloseItem
+        default: return nil
+        }
     }
 
     // MARK: - Install / uninstall
@@ -156,6 +257,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     func uninstall() {
         guard installed else { return }
         stopStripKeepAlive()
+        if detailVisible {
+            DFRBridge.dismissSystemModalTouchBar(detailTouchBar)
+            detailVisible = false
+        }
         if modalVisible {
             DFRBridge.dismissSystemModalTouchBar(modalTouchBar)
             modalVisible = false
@@ -197,6 +302,20 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         currentQuotes = quotes
         rebuildTrigger()
         scrubber.reloadData()
+        // If the detail bar is up, also refresh its labels/colors against
+        // the freshest quote.
+        if let sym = detailSymbol {
+            refreshDetail(for: sym)
+        }
+    }
+
+    /// Push a freshly-fetched minute series in. AppDelegate calls this on
+    /// every minute-tick or after an on-demand fetch.
+    func updateMinutes(symbol: String, points: [MinutePoint]) {
+        currentMinutes[symbol] = points
+        if detailSymbol == symbol {
+            detailChartView.points = points
+        }
     }
 
     // MARK: - Strip widget content (headline stock)
@@ -265,6 +384,79 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalVisible = false
     }
 
+    // MARK: - Detail Touch Bar lifecycle
+
+    /// Switch from the list modal to the detail modal for the given symbol.
+    /// Triggered by NSScrubber selection; also re-callable to update.
+    private func showDetail(for symbol: String) {
+        guard let item = currentItems.first(where: { $0.normalizedSymbol == symbol }) else { return }
+        detailSymbol = symbol
+        refreshDetail(for: symbol)
+        // Ask AppDelegate to populate / refresh the minute series.
+        onSelectDetail?(item)
+        // Tear down the list modal first so the system doesn't try to host
+        // both simultaneously.
+        if modalVisible {
+            DFRBridge.dismissSystemModalTouchBar(modalTouchBar)
+            modalVisible = false
+        }
+        DFRBridge.presentSystemModalTouchBar(
+            detailTouchBar,
+            systemTrayItemIdentifier: Self.stripIdentifier
+        )
+        detailVisible = true
+    }
+
+    /// Update label + chart with the freshest data for the currently
+    /// displayed symbol. Called both on initial show and on every quote
+    /// tick (in `update(items:quotes:)`) so price/pct stays live.
+    private func refreshDetail(for symbol: String) {
+        guard let item = currentItems.first(where: { $0.normalizedSymbol == symbol }) else { return }
+        let q = currentQuotes[symbol]
+        let alias = item.alias.isEmpty ? (q?.name ?? item.code) : item.alias
+        let pct = pctString(q?.pct)
+        let priceStr = q.map { String(format: "%.3f", $0.price) } ?? "—"
+        let color = pctColor(q?.pct)
+
+        // Compose "alias  price  +1.23%" — alias gray, price/pct colored.
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: alias + "  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.labelColor,
+        ]))
+        attr.append(NSAttributedString(string: priceStr + "  ", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: color,
+        ]))
+        attr.append(NSAttributedString(string: pct, attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: color,
+        ]))
+        detailLabel.attributedStringValue = attr
+
+        detailChartView.quote = q
+        detailChartView.points = currentMinutes[symbol] ?? []
+    }
+
+    @objc private func handleDetailBackTap(_ sender: Any?) {
+        detailSymbol = nil
+        DFRBridge.dismissSystemModalTouchBar(detailTouchBar)
+        detailVisible = false
+        // Reload + re-present the list modal.
+        scrubber.reloadData()
+        DFRBridge.presentSystemModalTouchBar(
+            modalTouchBar,
+            systemTrayItemIdentifier: Self.stripIdentifier
+        )
+        modalVisible = true
+    }
+
+    @objc private func handleDetailCloseTap(_ sender: Any?) {
+        detailSymbol = nil
+        DFRBridge.dismissSystemModalTouchBar(detailTouchBar)
+        detailVisible = false
+    }
+
     // MARK: - NSScrubberDataSource
 
     func numberOfItems(for scrubber: NSScrubber) -> Int {
@@ -284,6 +476,12 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
             downColor: downGreen
         )
         return cell
+    }
+
+    func scrubber(_ scrubber: NSScrubber, didSelectItemAt index: Int) {
+        guard index >= 0, index < currentItems.count else { return }
+        let item = currentItems[index]
+        showDetail(for: item.normalizedSymbol)
     }
 
     // MARK: - NSScrubberFlowLayoutDelegate
