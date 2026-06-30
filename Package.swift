@@ -7,7 +7,10 @@ let package = Package(
         .macOS(.v12)
     ],
     products: [
+        // Menu-bar app: existing behaviour, unchanged.
         .executable(name: "StockBar", targets: ["StockBar"]),
+        // Touch Bar–only agent app: same data layer, rendered on the DFR strip.
+        .executable(name: "StockTouchBar", targets: ["StockTouchBar"]),
     ],
     targets: [
         // Pure data layer — models, fetchers, market-hours, on-disk store.
@@ -21,6 +24,12 @@ let package = Package(
             name: "StockBar",
             dependencies: ["StockCore"],
             path: "Sources/StockBar"
+        ),
+        // Touch Bar UI (DFR control-strip presence + horizontal item bar).
+        .executableTarget(
+            name: "StockTouchBar",
+            dependencies: ["StockCore"],
+            path: "Sources/StockTouchBar"
         ),
     ]
 )
