@@ -1,4 +1,5 @@
 import AppKit
+import StockCore
 
 /// One row in the popover list:  [alias / code]  [name]  [price]  [pct]  [mini sparkline]
 /// Click toggles selection. Selected rows highlight; the controller below shows the full chart.

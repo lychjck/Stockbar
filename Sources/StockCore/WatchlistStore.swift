@@ -2,8 +2,8 @@ import Foundation
 
 /// Loads and saves the watchlist config.
 /// Default path: shared with stock-statusline plugin so users only manage one file.
-final class WatchlistStore {
-    static let defaultConfigPath: String = {
+public final class WatchlistStore {
+    public static let defaultConfigPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent("plugins/stock-statusline/config/watchlist.json")
@@ -11,16 +11,16 @@ final class WatchlistStore {
     }()
 
     /// Fallback path if the shared config doesn't exist — keep StockBar self-contained.
-    static let fallbackConfigPath: String = {
+    public static let fallbackConfigPath: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent(".config/stockbar/watchlist.json")
             .path
     }()
 
-    let configPath: String
+    public let configPath: String
 
-    init(configPath: String? = nil) {
+    public init(configPath: String? = nil) {
         if let configPath {
             self.configPath = configPath
         } else if FileManager.default.fileExists(atPath: WatchlistStore.defaultConfigPath) {
@@ -31,7 +31,7 @@ final class WatchlistStore {
     }
 
     /// Load watchlist from disk. Returns an empty list if file is missing/corrupt.
-    func load() -> Watchlist {
+    public func load() -> Watchlist {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)) else {
             return Watchlist()
         }
@@ -43,7 +43,7 @@ final class WatchlistStore {
     /// Returns the saved Watchlist (with the new item visible) so the caller can
     /// refresh UI without waiting for the file-system watcher to fire.
     @discardableResult
-    func addItem(code: String, alias: String?) throws -> Watchlist {
+    public func addItem(code: String, alias: String?) throws -> Watchlist {
         var current = load()
         let activeKey = current.active_group ?? "default"
         var groups = current.groups ?? [:]
@@ -71,7 +71,7 @@ final class WatchlistStore {
 
     /// Remove one item by 6-digit code from the active group.
     @discardableResult
-    func removeItem(code: String) throws -> Watchlist {
+    public func removeItem(code: String) throws -> Watchlist {
         var current = load()
         let activeKey = current.active_group ?? "default"
         var groups = current.groups ?? [:]
@@ -89,7 +89,7 @@ final class WatchlistStore {
     }
 
     /// Persist the watchlist as pretty-printed JSON.
-    func save(_ list: Watchlist) throws {
+    public func save(_ list: Watchlist) throws {
         // Ensure parent directory exists.
         let url = URL(fileURLWithPath: configPath)
         try FileManager.default.createDirectory(
@@ -105,7 +105,7 @@ final class WatchlistStore {
     /// Reorder the active group to match the given normalized-symbol order.
     /// Items not in the order list keep their relative positions at the end.
     @discardableResult
-    func reorder(symbolsInOrder: [String]) throws -> Watchlist {
+    public func reorder(symbolsInOrder: [String]) throws -> Watchlist {
         var current = load()
         let activeKey = current.active_group ?? "default"
         var groups = current.groups ?? [:]
@@ -139,7 +139,7 @@ final class WatchlistStore {
     /// Watch the config file for external edits (e.g. `stockline add ...`).
     /// Calls `onChange` on the main queue when the file is rewritten.
     /// Returns a DispatchSourceFileSystemObject that the caller must retain.
-    func watchForChanges(_ onChange: @escaping () -> Void) -> DispatchSourceFileSystemObject? {
+    public func watchForChanges(_ onChange: @escaping () -> Void) -> DispatchSourceFileSystemObject? {
         let fd = open(configPath, O_EVTONLY)
         guard fd >= 0 else { return nil }
         let source = DispatchSource.makeFileSystemObjectSource(

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Carbon.HIToolbox
+import StockCore
 
 @main
 final class StockBarApp {

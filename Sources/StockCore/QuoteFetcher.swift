@@ -4,8 +4,8 @@ import Foundation
 /// Endpoint: https://qt.gtimg.cn/q=sh000001,sz159770
 /// Response is GBK-encoded text in the form:
 ///     v_sh000001="1~上证指数~000001~3000.00~...";\n
-final class QuoteFetcher {
-    enum FetchError: Error {
+public final class QuoteFetcher {
+    public enum FetchError: Error {
         case invalidURL
         case emptyResponse
         case decodeFailed
@@ -14,7 +14,7 @@ final class QuoteFetcher {
 
     private let session: URLSession
 
-    init() {
+    public init() {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 5
         cfg.waitsForConnectivity = false
@@ -23,7 +23,7 @@ final class QuoteFetcher {
 
     /// Fetch quotes for the given symbols (e.g. ["sh000001", "sz159770"]).
     /// Returns parsed Quote objects in arbitrary order; map by `symbol` to align with watchlist.
-    func fetch(symbols: [String]) async throws -> [Quote] {
+    public func fetch(symbols: [String]) async throws -> [Quote] {
         guard !symbols.isEmpty else { return [] }
         let joined = symbols.joined(separator: ",")
         guard let url = URL(string: "https://qt.gtimg.cn/q=\(joined)") else {
@@ -67,7 +67,7 @@ final class QuoteFetcher {
     /// Call its index K; then for both stocks and indices:
     ///   change = K-4, pct = K-3, high = K-2, low = K-1,
     ///   volume = K+1 (手), amount = K+2 (万元), turnover = K+3 (%), PE = K+4
-    static func parse(_ text: String) -> [Quote] {
+    public static func parse(_ text: String) -> [Quote] {
         var result: [Quote] = []
         // Match assignments: v_<symbol>="..."
         let pattern = #"v_([a-z]{2}\d{6})="([^"]*)";"#

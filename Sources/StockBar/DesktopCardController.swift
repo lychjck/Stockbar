@@ -1,4 +1,5 @@
 import AppKit
+import StockCore
 
 /// A borderless, draggable, glassmorphic floating window that shows the
 /// watchlist as a compact desktop widget.

@@ -4,8 +4,8 @@ import Foundation
 /// Endpoint: https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=sh000001
 /// Response is JSON; the actual point list lives at:
 ///     data.<symbol>.data.data  (array of strings: "HHMM price volume turnover")
-final class MinuteFetcher {
-    enum FetchError: Error {
+public final class MinuteFetcher {
+    public enum FetchError: Error {
         case invalidURL
         case http(Int)
         case noData
@@ -14,7 +14,7 @@ final class MinuteFetcher {
 
     private let session: URLSession
 
-    init() {
+    public init() {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 6
         cfg.waitsForConnectivity = false
@@ -22,7 +22,7 @@ final class MinuteFetcher {
     }
 
     /// Fetch minute points for one symbol (e.g. "sh000001").
-    func fetch(symbol: String) async throws -> [MinutePoint] {
+    public func fetch(symbol: String) async throws -> [MinutePoint] {
         guard let url = URL(string: "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=\(symbol)") else {
             throw FetchError.invalidURL
         }
@@ -36,7 +36,7 @@ final class MinuteFetcher {
         return try Self.parse(data: data, symbol: symbol)
     }
 
-    static func parse(data: Data, symbol: String) throws -> [MinutePoint] {
+    public static func parse(data: Data, symbol: String) throws -> [MinutePoint] {
         guard
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let dataDict = json["data"] as? [String: Any],
@@ -63,7 +63,7 @@ final class MinuteFetcher {
     /// Map "HHMM" to minutes since 09:30, treating 11:30→13:00 as one continuous gap.
     /// 09:30 → 0, 11:30 → 120, 13:00 → 120, 15:00 → 240.
     /// Returns nil if outside [09:30, 15:00].
-    static func minutesFromOpen(hhmm: String) -> Int? {
+    public static func minutesFromOpen(hhmm: String) -> Int? {
         guard hhmm.count == 4, let v = Int(hhmm) else { return nil }
         let hour = v / 100
         let minute = v % 100

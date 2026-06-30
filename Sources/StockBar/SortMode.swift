@@ -1,4 +1,5 @@
 import AppKit
+import StockCore
 
 /// View-only sort applied to the watchlist in the popover and desktop card.
 ///

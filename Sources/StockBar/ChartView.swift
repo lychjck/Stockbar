@@ -1,4 +1,5 @@
 import AppKit
+import StockCore
 
 /// Renders today's minute-level price line.
 /// Two modes:

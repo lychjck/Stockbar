@@ -1,4 +1,5 @@
 import AppKit
+import StockCore
 
 /// View controller backing the NSPopover content.
 /// Layout (top → bottom):

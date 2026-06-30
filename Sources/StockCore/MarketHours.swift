@@ -2,9 +2,9 @@ import Foundation
 
 /// A-share market session helper.
 /// CN trading window: 09:30–11:30, 13:00–15:00, Mon–Fri (no holidays support).
-enum MarketHours {
+public enum MarketHours {
 
-    enum Phase: String {
+    public enum Phase: String {
         case weekend          // sat/sun
         case preMarket        // before 09:30
         case morningSession   // 09:30–11:30
@@ -12,12 +12,12 @@ enum MarketHours {
         case afternoonSession // 13:00–15:00
         case postMarket       // after 15:00
 
-        var isLive: Bool {
+        public var isLive: Bool {
             self == .morningSession || self == .afternoonSession
         }
 
         /// Short human-readable Chinese label for the current phase.
-        var label: String {
+        public var label: String {
             switch self {
             case .weekend: return "周末休市"
             case .preMarket: return "盘前"
@@ -31,7 +31,7 @@ enum MarketHours {
 
     /// Compute the current phase based on the local Asia/Shanghai time.
     /// We use the user's local clock — this app is meant for CN users on a CN clock.
-    static func currentPhase(date: Date = Date(), calendar: Calendar = .current) -> Phase {
+    public static func currentPhase(date: Date = Date(), calendar: Calendar = .current) -> Phase {
         let weekday = calendar.component(.weekday, from: date) // 1=Sunday
         if weekday == 1 || weekday == 7 { return .weekend }
 
@@ -55,7 +55,7 @@ enum MarketHours {
     ///   live trading → use config value (default 5s)
     ///   pre-/post-market or lunch → 60s (still useful for late prints)
     ///   weekend → 600s (basically idle, but we still poll for sanity)
-    static func recommendedInterval(base: TimeInterval, date: Date = Date()) -> TimeInterval {
+    public static func recommendedInterval(base: TimeInterval, date: Date = Date()) -> TimeInterval {
         switch currentPhase(date: date) {
         case .morningSession, .afternoonSession:
             return max(1, base)
