@@ -27,6 +27,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     static let stripIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.controlstrip")
+    static let modalSortIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.modal.sort")
     static let modalRowIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.row")
     static let modalCloseIdentifier =
@@ -54,6 +56,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     // MARK: - Modal Touch Bar (list view)
 
     private let modalTouchBar = NSTouchBar()
+    private let modalSortItem: NSCustomTouchBarItem
+    private let modalSortButton: NSButton
     private let modalRowItem: NSCustomTouchBarItem
     private let modalCloseItem: NSCustomTouchBarItem
     private let modalCloseButton: NSButton
@@ -79,6 +83,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - State
 
+    /// Watchlist items in source order (as on disk). Kept so that switching
+    /// back to `.manual` always reproduces the original arrangement, even
+    /// after several rounds of sorting.
+    private var unsortedItems: [WatchItem] = []
+    /// Watchlist items in the order actually shown (after `SortMode.apply`).
     private var currentItems: [WatchItem] = []
     private var currentQuotes: [String: Quote] = [:]
     /// Cached minute series per normalized symbol. Pushed in by AppDelegate
@@ -134,6 +143,19 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalRowItem = NSCustomTouchBarItem(identifier: Self.modalRowIdentifier)
         modalRowItem.view = scrubber
 
+        // ---- Sort button on the left of the modal: cycles manual →
+        // pctDesc → pctAsc → manual on each tap. The icon reflects the
+        // current mode (chevron-style arrows from SortMode.symbol).
+        modalSortButton = NSButton(title: "", target: nil, action: nil)
+        modalSortButton.imagePosition = .imageOnly
+        modalSortButton.bezelStyle = .rounded
+        modalSortButton.isBordered = false
+        modalSortButton.contentTintColor = .secondaryLabelColor
+        modalSortButton.translatesAutoresizingMaskIntoConstraints = false
+        modalSortButton.setContentHuggingPriority(.required, for: .horizontal)
+        modalSortItem = NSCustomTouchBarItem(identifier: Self.modalSortIdentifier)
+        modalSortItem.view = modalSortButton
+
         // ---- Custom close button on the right of the modal.
         modalCloseButton = NSButton(title: "", target: nil, action: nil)
         modalCloseButton.image = NSImage(
@@ -149,6 +171,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalCloseItem.view = modalCloseButton
 
         modalTouchBar.defaultItemIdentifiers = [
+            Self.modalSortIdentifier,
             Self.modalRowIdentifier,
             Self.modalCloseIdentifier,
         ]
@@ -233,6 +256,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         detailTouchBar.delegate = self
         triggerButton.target = self
         triggerButton.action = #selector(handleStripTap(_:))
+        modalSortButton.target = self
+        modalSortButton.action = #selector(handleSortTap(_:))
         modalCloseButton.target = self
         modalCloseButton.action = #selector(handleModalCloseTap(_:))
         detailBackButton.target = self
@@ -250,6 +275,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     func touchBar(_ touchBar: NSTouchBar,
                   makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         switch identifier {
+        case Self.modalSortIdentifier:   return modalSortItem
         case Self.modalRowIdentifier:    return modalRowItem
         case Self.modalCloseIdentifier:  return modalCloseItem
         case Self.detailBackIdentifier:  return detailBackItem
@@ -320,9 +346,15 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     // MARK: - Data binding
 
     func update(items: [WatchItem], quotes: [String: Quote]) {
-        currentItems = items
+        unsortedItems = items
         currentQuotes = quotes
+        // Apply the persisted sort each tick — quotes update means the
+        // ranking can change, e.g. a stock that just broke into the top
+        // pct should bubble up.
+        let mode = SortMode.current(scopeKey: SortMode.touchbarPreferenceKey)
+        currentItems = mode.apply(to: items, quotes: quotes)
         rebuildTrigger()
+        refreshSortButton()
         scrubber.reloadData()
         // If the detail bar is up, also refresh its labels/colors against
         // the freshest quote.
@@ -338,6 +370,39 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         if detailSymbol == symbol {
             detailChartView.points = points
         }
+    }
+
+    // MARK: - Sort handling
+
+    /// Cycle through manual → pctDesc → pctAsc → manual on each tap. Persist
+    /// to UserDefaults so the choice survives an app restart.
+    @objc private func handleSortTap(_ sender: Any?) {
+        let modes = SortMode.allCases
+        let cur = SortMode.current(scopeKey: SortMode.touchbarPreferenceKey)
+        let next = modes[(modes.firstIndex(of: cur)! + 1) % modes.count]
+        SortMode.setCurrent(next, scopeKey: SortMode.touchbarPreferenceKey)
+        // Re-sort from the original disk order — required so that switching
+        // back to `.manual` actually restores it (sorting an already-sorted
+        // list as `.manual` would just keep the previous sort's order).
+        currentItems = next.apply(to: unsortedItems, quotes: currentQuotes)
+        refreshSortButton()
+        rebuildTrigger()
+        scrubber.reloadData()
+    }
+
+    /// Sync sort button icon with the current mode (manual / pctDesc / pctAsc),
+    /// using the SF Symbols defined on `SortMode.symbol`. Active non-default
+    /// sorts get the accent color so the user has a clear visual cue that
+    /// the list isn't in disk order.
+    private func refreshSortButton() {
+        let mode = SortMode.current(scopeKey: SortMode.touchbarPreferenceKey)
+        modalSortButton.image = NSImage(
+            systemSymbolName: mode.symbol,
+            accessibilityDescription: mode.label
+        )
+        modalSortButton.contentTintColor = (mode == .manual)
+            ? .secondaryLabelColor
+            : NSColor.controlAccentColor
     }
 
     // MARK: - Strip widget content (headline stock)
