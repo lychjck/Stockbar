@@ -32,6 +32,10 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// Called when the user clicks the header's desktop-card toggle button.
     var onToggleDesktopCard: (() -> Void)?
 
+    /// Called when the user picks a different sort mode from the header menu.
+    /// `AppDelegate` uses this to also re-sort the desktop card.
+    var onSortModeChanged: ((SortMode) -> Void)?
+
     /// Weak ref to the hosting popover so we can resize it when content changes.
     weak var popover: NSPopover?
 
@@ -46,6 +50,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let quitButton = NSButton()
     private let addToggleButton = NSButton()
     private let desktopCardButton = NSButton()
+    private let sortButton = NSButton()
     private let resizeHandle = WidthResizeHandleView()
 
     // ---- Add bar (collapsible row below header)
@@ -68,6 +73,12 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
     private var rowViews: [String: WatchlistRowView] = [:]   // key: normalizedSymbol
     private var detailWidthConstraint: NSLayoutConstraint?
+
+    /// `items` filtered/sorted for rendering. The raw `items` array is kept in
+    /// the source order from disk, so `onReorder` can keep mutating the file
+    /// without fighting whatever transient view sort is active. Derived from
+    /// `items` + `quotes` + `SortMode.current` inside `reload()`.
+    private var displayItems: [WatchItem] = []
 
     private static let widthKey = "StockBar.panelWidth"
     private static let defaultWidth: CGFloat = 520
@@ -114,6 +125,8 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         configureHeaderButton(refreshButton, symbol: "arrow.clockwise", tooltip: "Refresh", action: #selector(handleRefresh))
         configureHeaderButton(addToggleButton, symbol: "plus.circle", tooltip: "Add stock / ETF", action: #selector(handleToggleAddBar))
         configureHeaderButton(desktopCardButton, symbol: "macwindow.on.rectangle", tooltip: "显示 / 隐藏桌面卡片", action: #selector(handleToggleDesktopCard))
+        configureHeaderButton(sortButton, symbol: SortMode.current.symbol, tooltip: "排序", action: #selector(handleSort))
+        applySortButtonTint()
         configureHeaderButton(configButton, symbol: "doc.text", tooltip: "Open watchlist.json", action: #selector(handleOpenConfig))
         configureHeaderButton(quitButton, symbol: "power", tooltip: "Quit StockBar", action: #selector(handleQuit))
 
@@ -124,6 +137,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         headerBar.addArrangedSubview(headerLabel)
         headerBar.addArrangedSubview(phaseLabel)
         headerBar.addArrangedSubview(spacer)
+        headerBar.addArrangedSubview(sortButton)
         headerBar.addArrangedSubview(addToggleButton)
         headerBar.addArrangedSubview(desktopCardButton)
         headerBar.addArrangedSubview(refreshButton)
@@ -286,6 +300,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
     /// Re-render the whole popover from current `items` / `quotes` / `minutes`.
     func reload() {
+        // Recompute the sorted view first so every downstream renderer (row stack,
+        // detail location, popover sizing) sees the same ordering for this tick.
+        displayItems = SortMode.current.apply(to: items, quotes: quotes)
         rebuildRowsIfNeeded()
         // After a full rebuild the detail container has been detached, so re-attach
         // it under the currently selected row (no-op if nothing selected).
@@ -361,12 +378,12 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     }
 
     private func rebuildRowsIfNeeded() {
-        let desiredKeys = items.map { $0.normalizedSymbol }
+        let desiredKeys = displayItems.map { $0.normalizedSymbol }
         let currentKeys = rowsStack.arrangedSubviews.compactMap { ($0 as? WatchlistRowView)?.item.normalizedSymbol }
 
         if desiredKeys == currentKeys {
             // Just re-bind items (in case alias changed).
-            for (i, item) in items.enumerated() {
+            for (i, item) in displayItems.enumerated() {
                 let sym = item.normalizedSymbol
                 if let row = rowsStack.arrangedSubviews[i] as? WatchlistRowView {
                     row.item = item
@@ -379,7 +396,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         // Otherwise rebuild from scratch.
         rowsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
-        for item in items {
+        for item in displayItems {
             let row = WatchlistRowView(item: item)
             row.translatesAutoresizingMaskIntoConstraints = false
             row.onClick = { [weak self] tapped in
@@ -455,6 +472,11 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private var dragOriginalIndex: Int = 0
 
     private func dragBegan(row: WatchlistRowView) {
+        // Drag-reorder only makes sense against the manual baseline. If the
+        // user is currently looking at a view-sorted list, silently ignore —
+        // the row's superficial drag state will clear on mouseUp.
+        guard SortMode.current == .manual else { return }
+
         // If detail is open, collapse it first so the chart doesn't fight with
         // the drag overlay for popover height.
         if selectedSymbol != nil {
@@ -720,6 +742,48 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     @objc private func handleOpenConfig() { onOpenConfig?() }
     @objc private func handleQuit() { onQuit?() }
     @objc private func handleToggleDesktopCard() { onToggleDesktopCard?() }
+
+    // MARK: - Sort menu
+
+    @objc private func handleSort() {
+        let menu = NSMenu()
+        let header = NSMenuItem(title: "排序方式", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for mode in SortMode.allCases {
+            let item = NSMenuItem(title: mode.label,
+                                  action: #selector(selectSort(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = (mode == SortMode.current) ? .on : .off
+            menu.addItem(item)
+        }
+        let origin = NSPoint(x: 0, y: sortButton.bounds.height + 4)
+        menu.popUp(positioning: nil, at: origin, in: sortButton)
+    }
+
+    @objc private func selectSort(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = SortMode(rawValue: raw),
+              mode != SortMode.current
+        else { return }
+        SortMode.current = mode
+        let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        sortButton.image = NSImage(systemSymbolName: mode.symbol, accessibilityDescription: "排序")?
+            .withSymbolConfiguration(cfg)
+        applySortButtonTint()
+        reload()
+        onSortModeChanged?(mode)
+    }
+
+    /// Highlight the sort button when a non-default sort is active, so the user
+    /// has a quick visual cue that the list isn't in their manual order.
+    private func applySortButtonTint() {
+        sortButton.contentTintColor = SortMode.current == .manual
+            ? .secondaryLabelColor
+            : NSColor.controlAccentColor
+    }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()

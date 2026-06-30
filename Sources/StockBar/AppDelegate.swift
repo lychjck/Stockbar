@@ -98,6 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self?.handleReorder(order: order)
         }
 
+        // Re-sort the desktop card whenever the popover's sort mode changes.
+        popoverController.onSortModeChanged = { [weak self] _ in
+            self?.pushDataToCard()
+        }
+
         // Desktop card: toggle from the popover header; clicking its own close
         // button just hides it (no extra state to sync since the button is
         // stateless).
@@ -184,7 +189,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Mirror current data into the desktop card. The card ignores the call
     /// while hidden, so this is safe to invoke unconditionally.
     private func pushDataToCard() {
-        desktopCard.items = watchlist.activeItems
+        // The card respects the same view-sort the popover uses, so the two
+        // lists stay in lock-step (sort mode is global / UserDefaults-backed).
+        desktopCard.items = SortMode.current.apply(to: watchlist.activeItems, quotes: quotes)
         desktopCard.quotes = quotes
         desktopCard.minutes = minutes
         desktopCard.lastUpdated = lastFetchedAt
