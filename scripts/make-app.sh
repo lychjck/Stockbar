@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Build StockBar and assemble a .app bundle.
+# Build StockBar and assemble a .app bundle, then stop any running copy and
+# install the freshly built bundle into /Applications.
 # Usage:
 #   ./scripts/make-app.sh         # release build, app at ./build/StockBar.app
 #   ./scripts/make-app.sh debug   # debug build (faster, larger)
 #
-# Requires: Xcode toolchain. Defaults to /Volumes/disk/Applications/Xcode.app
-# (override via DEVELOPER_DIR env var).
+# Env vars:
+#   DEVELOPER_DIR  Path to an Xcode.app/Contents/Developer to use for swiftc.
+#                  Defaults to /Volumes/disk/Applications/Xcode.app if present.
+#   NO_INSTALL=1   Skip copying the bundle into /Applications.
+#   NO_LAUNCH=1    Skip re-launching the installed bundle.
+#
+# Requires: Xcode toolchain.
 
 set -euo pipefail
 
@@ -54,5 +60,31 @@ codesign --force --sign - --options runtime "$APP" 2>&1 | sed 's/^/    /'
 
 echo
 echo "==> Built: $APP"
-echo "Run:   open '$APP'"
-echo "Or:    '$APP/Contents/MacOS/StockBar'   # foreground, ctrl-c to stop"
+
+# ---- Install + restart cycle.
+# Always stop any running StockBar first — matches both the dev build and the
+# previously installed /Applications copy by full executable path.
+echo "==> Stopping running StockBar (if any)"
+pkill -f 'StockBar\.app/Contents/MacOS/StockBar' 2>/dev/null || true
+# Tiny delay so Launch Services has settled before we replace the bundle.
+sleep 0.3
+
+if [[ -z "${NO_INSTALL:-}" ]]; then
+    DEST="/Applications/StockBar.app"
+    echo "==> Installing to $DEST"
+    rm -rf "$DEST"
+    cp -R "$APP" "$DEST"
+
+    if [[ -z "${NO_LAUNCH:-}" ]]; then
+        echo "==> Launching $DEST"
+        open "$DEST"
+    fi
+
+    echo
+    echo "Installed: $DEST"
+    echo "Stop:      pkill -f 'StockBar.app/Contents/MacOS/StockBar'"
+else
+    echo
+    echo "Run:   open '$APP'"
+    echo "Or:    '$APP/Contents/MacOS/StockBar'   # foreground, ctrl-c to stop"
+fi
