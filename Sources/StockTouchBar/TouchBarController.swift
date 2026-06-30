@@ -31,8 +31,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.sort")
     static let modalRowIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.row")
-    static let modalCloseIdentifier =
-        NSTouchBarItem.Identifier("local.stocktouchbar.modal.close")
     static let detailBackIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.back")
     static let detailLabelIdentifier =
@@ -41,8 +39,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.chart")
     static let detailPinIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.detail.pin")
-    static let detailCloseIdentifier =
-        NSTouchBarItem.Identifier("local.stocktouchbar.detail.close")
     static let scrubberCellIdentifier =
         NSUserInterfaceItemIdentifier("local.stocktouchbar.scrubber.cell")
 
@@ -59,8 +55,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private let modalSortItem: NSCustomTouchBarItem
     private let modalSortButton: NSButton
     private let modalRowItem: NSCustomTouchBarItem
-    private let modalCloseItem: NSCustomTouchBarItem
-    private let modalCloseButton: NSButton
     private let scrubber: NSScrubber
 
     // MARK: - Detail Touch Bar (single-stock intraday chart)
@@ -74,8 +68,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private let detailChartView: TouchBarChartView
     private let detailPinItem: NSCustomTouchBarItem
     private let detailPinButton: NSButton
-    private let detailCloseItem: NSCustomTouchBarItem
-    private let detailCloseButton: NSButton
 
     /// Notify AppDelegate that a cell was selected — used to fetch minute
     /// data on demand. Called with the picked `WatchItem`.
@@ -156,24 +148,9 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalSortItem = NSCustomTouchBarItem(identifier: Self.modalSortIdentifier)
         modalSortItem.view = modalSortButton
 
-        // ---- Custom close button on the right of the modal.
-        modalCloseButton = NSButton(title: "", target: nil, action: nil)
-        modalCloseButton.image = NSImage(
-            systemSymbolName: "xmark.circle.fill",
-            accessibilityDescription: "收起"
-        )
-        modalCloseButton.imagePosition = .imageOnly
-        modalCloseButton.bezelStyle = .rounded
-        modalCloseButton.isBordered = false
-        modalCloseButton.contentTintColor = .secondaryLabelColor
-        modalCloseButton.translatesAutoresizingMaskIntoConstraints = false
-        modalCloseItem = NSCustomTouchBarItem(identifier: Self.modalCloseIdentifier)
-        modalCloseItem.view = modalCloseButton
-
         modalTouchBar.defaultItemIdentifiers = [
             Self.modalSortIdentifier,
             Self.modalRowIdentifier,
-            Self.modalCloseIdentifier,
         ]
 
         // ---- Detail Touch Bar items.
@@ -228,26 +205,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         detailPinItem = NSCustomTouchBarItem(identifier: Self.detailPinIdentifier)
         detailPinItem.view = detailPinButton
 
-        detailCloseButton = NSButton(title: "", target: nil, action: nil)
-        detailCloseButton.image = NSImage(
-            systemSymbolName: "xmark.circle.fill",
-            accessibilityDescription: "收起"
-        )
-        detailCloseButton.imagePosition = .imageOnly
-        detailCloseButton.bezelStyle = .rounded
-        detailCloseButton.isBordered = false
-        detailCloseButton.contentTintColor = .secondaryLabelColor
-        detailCloseButton.translatesAutoresizingMaskIntoConstraints = false
-        detailCloseButton.setContentHuggingPriority(.required, for: .horizontal)
-        detailCloseItem = NSCustomTouchBarItem(identifier: Self.detailCloseIdentifier)
-        detailCloseItem.view = detailCloseButton
-
         detailTouchBar.defaultItemIdentifiers = [
             Self.detailBackIdentifier,
             Self.detailLabelIdentifier,
             Self.detailChartIdentifier,
             Self.detailPinIdentifier,
-            Self.detailCloseIdentifier,
         ]
 
         super.init()
@@ -258,14 +220,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         triggerButton.action = #selector(handleStripTap(_:))
         modalSortButton.target = self
         modalSortButton.action = #selector(handleSortTap(_:))
-        modalCloseButton.target = self
-        modalCloseButton.action = #selector(handleModalCloseTap(_:))
         detailBackButton.target = self
         detailBackButton.action = #selector(handleDetailBackTap(_:))
         detailPinButton.target = self
         detailPinButton.action = #selector(handleDetailPinTap(_:))
-        detailCloseButton.target = self
-        detailCloseButton.action = #selector(handleDetailCloseTap(_:))
         scrubber.dataSource = self
         scrubber.delegate = self
     }
@@ -277,12 +235,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         switch identifier {
         case Self.modalSortIdentifier:   return modalSortItem
         case Self.modalRowIdentifier:    return modalRowItem
-        case Self.modalCloseIdentifier:  return modalCloseItem
         case Self.detailBackIdentifier:  return detailBackItem
         case Self.detailLabelIdentifier: return detailLabelItem
         case Self.detailChartIdentifier: return detailChartItem
         case Self.detailPinIdentifier:   return detailPinItem
-        case Self.detailCloseIdentifier: return detailCloseItem
         default: return nil
         }
     }
@@ -466,11 +422,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalVisible = true
     }
 
-    @objc private func handleModalCloseTap(_ sender: Any?) {
-        DFRBridge.dismissSystemModalTouchBar(modalTouchBar)
-        modalVisible = false
-    }
-
     // MARK: - Detail Touch Bar lifecycle
 
     /// Switch from the list modal to the detail modal for the given symbol.
@@ -567,12 +518,6 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         //   - the strip widget switches to / away from this symbol
         refreshDetail(for: sym)
         rebuildTrigger()
-    }
-
-    @objc private func handleDetailCloseTap(_ sender: Any?) {
-        detailSymbol = nil
-        DFRBridge.dismissSystemModalTouchBar(detailTouchBar)
-        detailVisible = false
     }
 
     // MARK: - NSScrubberDataSource
