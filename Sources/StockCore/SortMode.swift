@@ -1,19 +1,20 @@
-import AppKit
-import StockCore
+import Foundation
 
-/// View-only sort applied to the watchlist in the popover and desktop card.
+/// View-only sort applied to the watchlist in the popover and desktop card
+/// (StockBar) and in the modal scrubber (StockTouchBar).
 ///
 /// This is a transient view setting — it does NOT mutate `watchlist.json`.
-/// The on-disk order is the "manual" baseline the user can always return to,
-/// and `stockline` / drag-reorder keep working as before. Persisted in
-/// `UserDefaults` so the chosen sort survives app restarts.
-enum SortMode: String, CaseIterable {
+/// The on-disk order is the "manual" baseline the user can always return to.
+/// Each frontend stores its own preference under a different UserDefaults
+/// key so the menubar and Touch Bar can carry independent sorts without
+/// fighting each other.
+public enum SortMode: String, CaseIterable {
     case manual  = "manual"   // user's manual order (from watchlist.json)
     case pctDesc = "pctDesc"  // top movers first
     case pctAsc  = "pctAsc"   // worst movers first
 
-    /// Menu label shown in the header sort button's popup.
-    var label: String {
+    /// Menu label shown in popup menus.
+    public var label: String {
         switch self {
         case .manual:  return "默认顺序"
         case .pctDesc: return "涨幅由高到低"
@@ -22,7 +23,7 @@ enum SortMode: String, CaseIterable {
     }
 
     /// SF Symbol shown on the header button to hint the current mode.
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .manual:  return "arrow.up.arrow.down"
         case .pctDesc: return "arrow.down.to.line"
@@ -30,24 +31,43 @@ enum SortMode: String, CaseIterable {
         }
     }
 
-    private static let userDefaultsKey = "StockBar.sortMode"
+    // MARK: - Persistence
 
-    /// Currently active sort mode, persisted across launches.
-    static var current: SortMode {
-        get {
-            let raw = UserDefaults.standard.string(forKey: userDefaultsKey) ?? ""
-            return SortMode(rawValue: raw) ?? .manual
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: userDefaultsKey)
-        }
+    /// UserDefaults key for the menu-bar app's sort preference.
+    /// Historical name retained for backward compatibility.
+    public static let menubarPreferenceKey = "StockBar.sortMode"
+    /// UserDefaults key for the Touch Bar app's sort preference.
+    public static let touchbarPreferenceKey = "StockTouchBar.sortMode"
+
+    /// Read the sort mode persisted under the given UserDefaults key.
+    /// Frontends pass their own scope key (`menubarPreferenceKey` /
+    /// `touchbarPreferenceKey`) so each one has an independent setting
+    /// even when both apps run side by side.
+    public static func current(scopeKey: String) -> SortMode {
+        let raw = UserDefaults.standard.string(forKey: scopeKey) ?? ""
+        return SortMode(rawValue: raw) ?? .manual
     }
+
+    /// Persist `mode` under the given UserDefaults key.
+    public static func setCurrent(_ mode: SortMode, scopeKey: String) {
+        UserDefaults.standard.set(mode.rawValue, forKey: scopeKey)
+    }
+
+    /// Backward-compatible shortcut for the menu-bar app: reads/writes
+    /// `menubarPreferenceKey`. New callers should prefer the explicit
+    /// `current(scopeKey:)` / `setCurrent(_:scopeKey:)` form.
+    public static var current: SortMode {
+        get { current(scopeKey: menubarPreferenceKey) }
+        set { setCurrent(newValue, scopeKey: menubarPreferenceKey) }
+    }
+
+    // MARK: - Apply
 
     /// Apply this sort to a list of watch items using `quotes` for live data.
     /// Items without a quote are pushed to the bottom in both pct sorts so they
     /// never block live rankings.  Ties (equal pct, or both missing) fall back
     /// to the original input order for stability.
-    func apply(to items: [WatchItem], quotes: [String: Quote]) -> [WatchItem] {
+    public func apply(to items: [WatchItem], quotes: [String: Quote]) -> [WatchItem] {
         switch self {
         case .manual:
             return items
