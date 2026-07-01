@@ -88,6 +88,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     /// Symbol currently shown in the detail Touch Bar, if any. nil means we
     /// are showing the list (or have closed entirely).
     private var detailSymbol: String?
+    /// 用户上次浏览的 symbol，用于从 detail 返回或排序切换时恢复滚动位置
+    private var lastViewedSymbol: String?
     private var installed = false
     private var modalVisible = false
     private var detailVisible = false
@@ -315,13 +317,25 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         rebuildTrigger()
         refreshSortButton()
 
-        // Only reloadData (which resets the scrubber's scroll offset back to
-        // the start — very jarring when the user is mid-drag) when the row
-        // order actually changed. When it's just a price refresh with the
-        // same symbols in the same positions, update the visible cells in
-        // place so the scroll position is preserved.
+        // 策略：尽量避免 reloadData 以保持滚动位置。
+        // - 如果顺序改变且改变"显著"（前几位变化或用户可能关注的区域），
+        //   才 reload + 恢复位置
+        // - 否则只刷新可见 cell 的内容，完全保持滚动
         if orderChanged {
-            scrubber.reloadData()
+            let shouldReload = isSignificantOrderChange(
+                old: currentItems.map { $0.normalizedSymbol },
+                new: newItems.map { $0.normalizedSymbol }
+            )
+            if shouldReload {
+                let scrollTarget = lastViewedSymbol
+                scrubber.reloadData()
+                if let target = scrollTarget {
+                    restoreScrollPosition(to: target)
+                }
+            } else {
+                // 顺序变了但不显著（比如只是尾部微调），直接刷新内容
+                refreshVisibleCells()
+            }
         } else {
             refreshVisibleCells()
         }
@@ -363,6 +377,9 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     /// Cycle through manual → pctDesc → pctAsc → manual on each tap. Persist
     /// to UserDefaults so the choice survives an app restart.
     @objc private func handleSortTap(_ sender: Any?) {
+        // 记录当前可见区域中间的 symbol，排序后恢复到这个位置附近
+        let scrollTarget = getVisibleCenterSymbol()
+
         let modes = SortMode.allCases
         let cur = SortMode.current(scopeKey: SortMode.touchbarPreferenceKey)
         let next = modes[(modes.firstIndex(of: cur)! + 1) % modes.count]
@@ -374,6 +391,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         refreshSortButton()
         rebuildTrigger()
         scrubber.reloadData()
+
+        // 恢复到之前可见的 symbol（或尽可能接近的位置）
+        if let target = scrollTarget {
+            restoreScrollPosition(to: target)
+        }
     }
 
     /// Sync sort button icon with the current mode (manual / pctDesc / pctAsc),
@@ -520,8 +542,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         detailSymbol = nil
         DFRBridge.dismissSystemModalTouchBar(detailTouchBar)
         detailVisible = false
-        // Reload + re-present the list modal.
-        scrubber.reloadData()
+        // 恢复到之前查看的位置，而不是强制刷新整个列表
+        if let target = lastViewedSymbol {
+            restoreScrollPosition(to: target)
+        }
         DFRBridge.presentSystemModalTouchBar(
             modalTouchBar,
             systemTrayItemIdentifier: Self.stripIdentifier
@@ -574,6 +598,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     func scrubber(_ scrubber: NSScrubber, didSelectItemAt index: Int) {
         guard index >= 0, index < currentItems.count else { return }
         let item = currentItems[index]
+        // 记录用户选择的 symbol，用于返回时恢复位置
+        lastViewedSymbol = item.normalizedSymbol
         showDetail(for: item.normalizedSymbol)
     }
 
@@ -615,6 +641,45 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     private func pctColor(_ pct: Double?) -> NSColor {
         guard let pct, pct != 0 else { return .labelColor }
         return pct > 0 ? upRed : downGreen
+    }
+
+    // MARK: - Scroll position restoration
+
+    /// 获取当前可见区域中间位置的 symbol，用于记录滚动位置
+    private func getVisibleCenterSymbol() -> String? {
+        // NSScrubber 没有直接的 visibleRect API，我们通过枚举可见 cell 来推断
+        var visibleIndices: [Int] = []
+        for i in 0..<currentItems.count {
+            if scrubber.itemViewForItem(at: i) != nil {
+                visibleIndices.append(i)
+            }
+        }
+        guard !visibleIndices.isEmpty else { return nil }
+        // 取中间位置的 index
+        let midIndex = visibleIndices[visibleIndices.count / 2]
+        return currentItems[midIndex].normalizedSymbol
+    }
+
+    /// 将 scrubber 滚动到指定 symbol 的位置（居中显示）
+    private func restoreScrollPosition(to symbol: String) {
+        guard let index = currentItems.firstIndex(where: { $0.normalizedSymbol == symbol })
+        else { return }
+        // scrollItemAtIndex 会尽可能将指定 index 滚动到可见区域
+        scrubber.scrollItem(at: index, to: .none)
+    }
+
+    /// 判断顺序变化是否"显著"，只有显著变化才值得 reload（否则只刷新内容）。
+    /// 策略：检查前 N 个位置是否有变化 — 用户通常关注涨幅榜前几名。
+    private func isSignificantOrderChange(old: [String], new: [String]) -> Bool {
+        guard old.count == new.count, !old.isEmpty else { return true }
+        // 只检查前 5 个位置（或列表长度，取较小值）
+        let checkCount = min(5, old.count)
+        for i in 0..<checkCount {
+            if old[i] != new[i] {
+                return true
+            }
+        }
+        return false
     }
 }
 
