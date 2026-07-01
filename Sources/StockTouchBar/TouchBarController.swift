@@ -308,14 +308,44 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         // ranking can change, e.g. a stock that just broke into the top
         // pct should bubble up.
         let mode = SortMode.current(scopeKey: SortMode.touchbarPreferenceKey)
-        currentItems = mode.apply(to: items, quotes: quotes)
+        let newItems = mode.apply(to: items, quotes: quotes)
+        let orderChanged = newItems.map { $0.normalizedSymbol }
+            != currentItems.map { $0.normalizedSymbol }
+        currentItems = newItems
         rebuildTrigger()
         refreshSortButton()
-        scrubber.reloadData()
+
+        // Only reloadData (which resets the scrubber's scroll offset back to
+        // the start — very jarring when the user is mid-drag) when the row
+        // order actually changed. When it's just a price refresh with the
+        // same symbols in the same positions, update the visible cells in
+        // place so the scroll position is preserved.
+        if orderChanged {
+            scrubber.reloadData()
+        } else {
+            refreshVisibleCells()
+        }
+
         // If the detail bar is up, also refresh its labels/colors against
         // the freshest quote.
         if let sym = detailSymbol {
             refreshDetail(for: sym)
+        }
+    }
+
+    /// Re-bind the freshest quote into every currently-realized scrubber cell
+    /// without calling `reloadData()`, so the scroll offset is untouched.
+    private func refreshVisibleCells() {
+        for index in 0..<currentItems.count {
+            guard let cell = scrubber.itemViewForItem(at: index) as? StockScrubberItemView
+            else { continue }
+            let item = currentItems[index]
+            cell.configure(
+                item: item,
+                quote: currentQuotes[item.normalizedSymbol],
+                upColor: upRed,
+                downColor: downGreen
+            )
         }
     }
 
