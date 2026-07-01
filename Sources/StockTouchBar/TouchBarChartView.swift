@@ -69,10 +69,16 @@ final class TouchBarChartView: NSView {
             let usable = height - 2 * inset
             return inset + CGFloat((price - yMin) / (yMax - yMin)) * usable
         }
-        func x(for index: Int) -> CGFloat {
+        // Full CN trading day = 240 tradable minutes (09:30–11:30 morning +
+        // 13:00–15:00 afternoon, lunch break compressed). Positioning x by
+        // absolute minutes-from-open — instead of `index / count` — means
+        // 5 minutes of data occupy the leftmost ~2% of the strip, not the
+        // whole width; the chart grows through the day.
+        let xMax: CGFloat = 240
+        func x(for point: MinutePoint) -> CGFloat {
             let inset: CGFloat = 2
             let usable = width - 2 * inset
-            return inset + CGFloat(index) / CGFloat(points.count - 1) * usable
+            return inset + CGFloat(point.minutesFromOpen) / xMax * usable
         }
 
         // ---- Dashed baseline at prev-close.
@@ -92,7 +98,7 @@ final class TouchBarChartView: NSView {
 
         let linePath = NSBezierPath()
         for (i, p) in points.enumerated() {
-            let pt = NSPoint(x: x(for: i), y: y(for: p.price))
+            let pt = NSPoint(x: x(for: p), y: y(for: p.price))
             if i == 0 { linePath.move(to: pt) }
             else      { linePath.line(to: pt) }
         }
