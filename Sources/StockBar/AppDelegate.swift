@@ -368,8 +368,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
         let symbols = items.map { $0.normalizedSymbol }
+
+        // Always fetch the three major indices for header display
+        let indices = ["sh000001", "sz399001", "sz399006"]
+        let allSymbols = Array(Set(symbols + indices))
+
         do {
-            let result = try await quoteFetcher.fetch(symbols: symbols)
+            let result = try await quoteFetcher.fetch(symbols: allSymbols)
             for q in result { self.quotes[q.symbol] = q }
             self.lastFetchedAt = Date()
             // Adjust timer if we just crossed a phase boundary.

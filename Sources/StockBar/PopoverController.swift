@@ -49,6 +49,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
     private let headerLabel = NSTextField(labelWithString: "")
     private let phaseLabel = NSTextField(labelWithString: "")
+    private let indicesLabel = NSTextField(labelWithString: "")  // 三大指数显示
     private let refreshButton = NSButton()
     private let configButton = NSButton()
     private let preferencesButton = NSButton()
@@ -84,6 +85,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// without fighting whatever transient view sort is active. Derived from
     /// `items` + `quotes` + `SortMode.current` inside `reload()`.
     private var displayItems: [WatchItem] = []
+
+    /// Track last computed size to avoid redundant animations.
+    private var lastPopoverSize: NSSize = .zero
 
     private static let widthKey = "StockBar.panelWidth"
     private static let defaultWidth: CGFloat = 520
@@ -127,6 +131,10 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         phaseLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         phaseLabel.textColor = .secondaryLabelColor
 
+        indicesLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        indicesLabel.textColor = .secondaryLabelColor
+        indicesLabel.alignment = .left
+
         configureHeaderButton(refreshButton, symbol: "arrow.clockwise", tooltip: "Refresh", action: #selector(handleRefresh))
         configureHeaderButton(addToggleButton, symbol: "plus.circle", tooltip: "Add stock / ETF", action: #selector(handleToggleAddBar))
         configureHeaderButton(desktopCardButton, symbol: "macwindow.on.rectangle", tooltip: "显示 / 隐藏桌面卡片", action: #selector(handleToggleDesktopCard))
@@ -140,8 +148,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         spacer.translatesAutoresizingMaskIntoConstraints = false
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
 
-        headerBar.addArrangedSubview(headerLabel)
-        headerBar.addArrangedSubview(phaseLabel)
+        // headerBar.addArrangedSubview(headerLabel)
+        // headerBar.addArrangedSubview(phaseLabel)
+        headerBar.addArrangedSubview(indicesLabel)
         headerBar.addArrangedSubview(spacer)
         headerBar.addArrangedSubview(sortButton)
         headerBar.addArrangedSubview(addToggleButton)
@@ -343,6 +352,11 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         let total = chrome + max(listClamp, 28)
         let width = Self.savedPanelWidth
         let newSize = NSSize(width: width, height: total)
+
+        // Skip animation if size hasn't changed.
+        guard newSize != lastPopoverSize else { return }
+        lastPopoverSize = newSize
+
         preferredContentSize = newSize
         if let pop = popover, pop.contentSize != newSize {
             NSAnimationContext.runAnimationGroup({ ctx in
@@ -371,6 +385,51 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         }
         phaseLabel.stringValue = humanPhase(marketPhase)
         phaseLabel.textColor = marketPhase.isLive ? NSColor.systemRed.withAlphaComponent(0.8) : .secondaryLabelColor
+        updateIndicesLabel()
+    }
+
+    /// Build the three-major-indices summary (沪指, 深指, 创业板).
+    private func updateIndicesLabel() {
+        let indices = ["sh000001", "sz399001", "sz399006"]
+        let attrString = NSMutableAttributedString()
+
+        for (idx, sym) in indices.enumerated() {
+            guard let q = quotes[sym] else { continue }
+            let pctStr = String(format: "%+.2f%%", q.pct)
+            let color: NSColor = q.pct >= 0 ? .systemRed : .systemGreen
+
+            // Short alias: 沪指/深指/创业
+            let alias: String
+            if sym == "sh000001" {
+                alias = "沪"
+            } else if sym == "sz399001" {
+                alias = "深"
+            } else {
+                alias = "创"
+            }
+
+            let text = "\(alias) \(pctStr)"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: color,
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+            ]
+            attrString.append(NSAttributedString(string: text, attributes: attrs))
+
+            // Add separator between indices
+            if idx < indices.count - 1 {
+                let separatorAttrs: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: NSColor.secondaryLabelColor,
+                    .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+                ]
+                attrString.append(NSAttributedString(string: "  ", attributes: separatorAttrs))
+            }
+        }
+
+        if attrString.length == 0 {
+            indicesLabel.stringValue = ""
+        } else {
+            indicesLabel.attributedStringValue = attrString
+        }
     }
 
     private func humanPhase(_ p: MarketHours.Phase) -> String {
