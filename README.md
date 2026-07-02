@@ -1,13 +1,15 @@
 # StockBar
 
-A native macOS menu-bar app that shows your A-share / ETF watchlist with **inline minute-level sparklines** (Stats-style), a per-symbol intraday chart on click, and **Touch Bar integration** for MacBook Pro users.
+A native macOS menu-bar app that shows your A-share / ETF watchlist with **inline minute-level sparklines** (Stats-style), a per-symbol intraday chart on click, and **Touch Bar integration** for MacBook Pro users. Both menu bar and Touch Bar features are **configurable** — enable/disable each independently through the built-in preferences window.
 
 ![Menu Bar Popover](docs/images/menubar-popover.png)
 
 ## Features
 
+- **Unified App** — One application with both menu bar and Touch Bar support, configurable independently
 - **Menu Bar Integration** — Persistent status icon with expandable popover showing your full watchlist
 - **Touch Bar Support** — Real-time quotes and intraday charts directly on your MacBook Pro's Touch Bar with intelligent scrolling and sorting
+- **Configurable UI** — Enable/disable menu bar or Touch Bar independently via the preferences window (gear icon)
 - **Inline Sparklines** — Stats-style minute-level trend visualization for each symbol
 - **Interactive Charts** — Click any row to expand a full intraday chart (09:30–15:00)
 - **Pure Swift + AppKit** — No Xcode project needed at runtime, no Electron, no Python
@@ -25,7 +27,15 @@ The popover shows your full watchlist with:
 - Current market phase indicator (盘前 / ● 上午盘 / 午休 / ● 下午盘 / 已收盘 / 周末休市)
 - Per-symbol: alias · 6-digit code · price · today's % change · mini sparkline
 - Click any row to expand the full intraday chart below
-- Header buttons: `⟳` refresh, `📄` open watchlist.json, `⏻` quit
+- Header buttons: `⟳` refresh, `⚙️` preferences, `📄` open watchlist.json, `⏻` quit
+
+### Preferences
+
+Click the gear icon (`⚙️`) in the popover header to open the preferences window:
+- **显示菜单栏图标** — Toggle the menu bar status item on/off
+- **显示 Touch Bar** — Toggle Touch Bar integration on/off (auto-disabled on devices without Touch Bar)
+- Changes apply immediately without restarting the app
+- At least one interface must remain enabled
 
 ### Touch Bar
 
@@ -85,18 +95,20 @@ To launch at login: drag `StockBar.app` into **System Settings → General → L
 - Click outside the popover (or anywhere in another app) → popover closes
 - Header buttons:
   - `⟳` — force a refresh now
+  - `⚙️` — open preferences to toggle menu bar / Touch Bar
   - `📄` — open `watchlist.json` in your default editor
   - `⏻` — quit StockBar
 
 ### Touch Bar (MacBook Pro)
 
 - **Scrubber** — Horizontal scrollable list showing all symbols with real-time prices and % changes
-- **Tap any symbol** → opens a modal Touch Bar view with the full intraday chart
+- **Tap any symbol** — Opens a modal Touch Bar view with the full intraday chart
 - **Sort button** — Cycles through three modes:
   1. **List order** — as defined in `watchlist.json`
   2. **Gainers first** — symbols sorted by % change descending (red on top)
   3. **Losers first** — symbols sorted by % change ascending (green on top)
 - **Scroll position preservation** — The scrubber intelligently maintains your scroll position across refreshes, resetting only when you change sorting mode
+- **Configure** — Enable/disable Touch Bar independently from menu bar via preferences (`⚙️` button in popover)
 - **System close button** — Native macOS close box on the left to exit chart view
 
 The Touch Bar automatically appears when StockBar is running and updates in sync with the menu-bar popover.

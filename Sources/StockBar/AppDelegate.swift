@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Carbon.HIToolbox
 import StockCore
+import StockTouchBar
 
 @main
 final class StockBarApp {
@@ -18,8 +19,11 @@ final class StockBarApp {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
+    // App configuration
+    private var appConfig = AppConfig.load()
+
     // Status bar
-    private var statusItem: NSStatusItem!
+    private var statusItem: NSStatusItem?
 
     // Popover
     private let popover = NSPopover()
@@ -28,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // Desktop floating card widget
     private let desktopCard = DesktopCardController()
     private var toggleHotKey: GlobalHotKey?
+
+    // Touch Bar
+    private var touchBarController: TouchBarController?
+
+    // Preferences window
+    private var preferencesWindow: PreferencesWindowController?
 
     // Data layer
     private let store = WatchlistStore()
@@ -57,15 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         watchlist = store.load()
 
-        // ---- Status item: icon or a pinned symbol's text, no fixed width.
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.target = self
-            button.action = #selector(togglePopover(_:))
-            // Catch right-click separately if needed; left-click toggles popover.
-            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // ---- Status item: conditionally create based on config
+        if appConfig.enableMenuBar {
+            setupMenuBar()
         }
-        updateStatusItemDisplay()
 
         // ---- Popover
         popover.contentViewController = popoverController
@@ -79,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         popoverController.onOpenConfig = { [weak self] in
             self?.openConfigFile()
+        }
+        popoverController.onOpenPreferences = { [weak self] in
+            self?.openPreferences()
         }
         popoverController.onQuit = {
             NSApp.terminate(nil)
@@ -128,6 +136,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task { @MainActor in self?.toggleDesktopCard() }
         }
 
+        // ---- Touch Bar: conditionally install based on config
+        if appConfig.enableTouchBar {
+            setupTouchBar()
+        }
+
         startQuoteTimer()
         startMinuteTimer()
         startWatchingConfigFile()
@@ -148,12 +161,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         quoteTimer?.invalidate()
         minuteTimer?.invalidate()
         fileWatcher?.cancel()
+        touchBarController?.uninstall()
+    }
+
+    // MARK: - Setup
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = statusItem?.button {
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+            // Catch right-click separately if needed; left-click toggles popover.
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        updateStatusItemDisplay()
+    }
+
+    private func teardownMenuBar() {
+        if let item = statusItem {
+            NSStatusBar.system.removeStatusItem(item)
+            statusItem = nil
+        }
+    }
+
+    private func setupTouchBar() {
+        guard DFRBridge.isAvailable else {
+            NSLog("[StockBar] DFRFoundation not available, Touch Bar features disabled")
+            return
+        }
+        let controller = TouchBarController()
+        controller.onSelectDetail = { [weak self] item in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.fetchMinutes(for: item.normalizedSymbol, alsoMissing: false)
+            }
+        }
+        controller.onOpenPreferences = { [weak self] in
+            self?.openPreferences()
+        }
+        controller.install()
+        touchBarController = controller
+        // Push initial data
+        pushDataToTouchBar()
+    }
+
+    private func teardownTouchBar() {
+        touchBarController?.uninstall()
+        touchBarController = nil
+    }
+
+    private func openPreferences() {
+        if preferencesWindow == nil {
+            preferencesWindow = PreferencesWindowController(
+                config: appConfig,
+                onConfigChanged: { [weak self] newConfig in
+                    self?.handleConfigChanged(newConfig)
+                }
+            )
+        }
+        preferencesWindow?.show()
+    }
+
+    private func handleConfigChanged(_ newConfig: AppConfig) {
+        let oldConfig = appConfig
+        appConfig = newConfig
+
+        // Menu bar toggle
+        if oldConfig.enableMenuBar != newConfig.enableMenuBar {
+            if newConfig.enableMenuBar {
+                setupMenuBar()
+            } else {
+                teardownMenuBar()
+            }
+        }
+
+        // Touch Bar toggle
+        if oldConfig.enableTouchBar != newConfig.enableTouchBar {
+            if newConfig.enableTouchBar {
+                setupTouchBar()
+            } else {
+                teardownTouchBar()
+            }
+        }
     }
 
     // MARK: - Popover
 
     @objc private func togglePopover(_ sender: AnyObject?) {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         // buttonNumber 1 = right-click; anything else = left-click.
         if NSApp.currentEvent?.buttonNumber == 1 {
             showStatusMenu()
@@ -198,6 +293,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         desktopCard.lastUpdated = lastFetchedAt
         desktopCard.marketPhase = MarketHours.currentPhase()
         desktopCard.reload()
+    }
+
+    /// Push current data to Touch Bar controller.
+    private func pushDataToTouchBar() {
+        touchBarController?.update(items: watchlist.activeItems, quotes: quotes)
     }
 
     /// Show/hide the desktop card. Triggered by the popover button and the
@@ -280,10 +380,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 pushDataToController()
             }
             pushDataToCard()
+            pushDataToTouchBar()
             updateStatusItemDisplay()
         } catch {
             // Keep stale quotes; mark in tooltip.
-            statusItem.button?.toolTip = "Last fetch failed: \(error)"
+            statusItem?.button?.toolTip = "Last fetch failed: \(error)"
         }
     }
 
@@ -294,6 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.minutes[symbol] = pts
             if popover.isShown { pushDataToController() }
             pushDataToCard()
+            touchBarController?.updateMinutes(symbol: symbol, points: pts)
         } catch {
             // ignore — chart will show "no data"
         }
@@ -317,6 +419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         if popover.isShown { pushDataToController() }
         pushDataToCard()
+        pushDataToTouchBar()
     }
 
     // MARK: - Add / remove
@@ -328,9 +431,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // Push immediately so the new row shows up before the file watcher fires.
             pushDataToController()
             pushDataToCard()
+            pushDataToTouchBar()
             Task { await self.refreshAll(force: true) }
         } catch {
-            statusItem.button?.toolTip = "Failed to add: \(error)"
+            statusItem?.button?.toolTip = "Failed to add: \(error)"
         }
     }
 
@@ -345,9 +449,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             minutes.removeValue(forKey: sym)
             pushDataToController()
             pushDataToCard()
+            pushDataToTouchBar()
             updateStatusItemDisplay()
         } catch {
-            statusItem.button?.toolTip = "Failed to remove: \(error)"
+            statusItem?.button?.toolTip = "Failed to remove: \(error)"
         }
     }
 
@@ -359,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // visually; pushing here would rebuild and disturb the user. The
             // file-system watcher will fire and reconcile state shortly.
         } catch {
-            statusItem.button?.toolTip = "Failed to reorder: \(error)"
+            statusItem?.button?.toolTip = "Failed to reorder: \(error)"
         }
     }
 
@@ -373,7 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// green down, CN convention). Falls back to the icon if the pinned symbol
     /// is missing or has no quote yet.
     private func updateStatusItemDisplay() {
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         let mode = UserDefaults.standard.string(forKey: statusModeKey) ?? "icon"
         let pinned = UserDefaults.standard.string(forKey: statusSymbolKey)
 
@@ -412,7 +517,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Pop up the right-click configuration menu under the status item.
     private func showStatusMenu() {
         let menu = buildStatusMenu()
-        guard let button = statusItem.button else { return }
+        guard let button = statusItem?.button else { return }
         let origin = NSPoint(x: 0, y: button.bounds.height + 4)
         menu.popUp(positioning: nil, at: origin, in: button)
     }

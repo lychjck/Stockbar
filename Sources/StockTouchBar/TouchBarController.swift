@@ -19,7 +19,7 @@ import StockCore
 /// All UI mutations happen on the main actor. `install()` is idempotent;
 /// data updates come in via `update(items:quotes:)` on every quote tick.
 @MainActor
-final class TouchBarController: NSObject, NSTouchBarDelegate,
+public final class TouchBarController: NSObject, NSTouchBarDelegate,
                                  NSScrubberDataSource, NSScrubberDelegate,
                                  NSScrubberFlowLayoutDelegate {
 
@@ -29,6 +29,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         NSTouchBarItem.Identifier("local.stocktouchbar.controlstrip")
     static let modalSortIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.sort")
+    static let modalPreferencesIdentifier =
+        NSTouchBarItem.Identifier("local.stocktouchbar.modal.preferences")
     static let modalRowIdentifier =
         NSTouchBarItem.Identifier("local.stocktouchbar.modal.row")
     static let detailBackIdentifier =
@@ -52,6 +54,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
     // MARK: - Modal Touch Bar (list view)
 
     private let modalTouchBar = NSTouchBar()
+    private let modalPreferencesItem: NSCustomTouchBarItem
+    private let modalPreferencesButton: NSButton
     private let modalSortItem: NSCustomTouchBarItem
     private let modalSortButton: NSButton
     private let modalRowItem: NSCustomTouchBarItem
@@ -71,7 +75,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     /// Notify AppDelegate that a cell was selected — used to fetch minute
     /// data on demand. Called with the picked `WatchItem`.
-    var onSelectDetail: ((WatchItem) -> Void)?
+    public var onSelectDetail: ((WatchItem) -> Void)?
+
+    /// Notify AppDelegate to open preferences window.
+    public var onOpenPreferences: (() -> Void)?
 
     // MARK: - State
 
@@ -108,7 +115,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - Init
 
-    override init() {
+    public override init() {
         stripItem = NSCustomTouchBarItem(identifier: Self.stripIdentifier)
         triggerButton = NSButton(title: "—", target: nil, action: nil)
         triggerButton.bezelStyle = .rounded
@@ -150,7 +157,23 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         modalSortItem = NSCustomTouchBarItem(identifier: Self.modalSortIdentifier)
         modalSortItem.view = modalSortButton
 
+        // ---- Preferences button: opens settings window.
+        modalPreferencesButton = NSButton(title: "", target: nil, action: nil)
+        modalPreferencesButton.image = NSImage(
+            systemSymbolName: "gearshape.fill",
+            accessibilityDescription: "偏好设置"
+        )
+        modalPreferencesButton.imagePosition = .imageOnly
+        modalPreferencesButton.bezelStyle = .rounded
+        modalPreferencesButton.isBordered = false
+        modalPreferencesButton.contentTintColor = .secondaryLabelColor
+        modalPreferencesButton.translatesAutoresizingMaskIntoConstraints = false
+        modalPreferencesButton.setContentHuggingPriority(.required, for: .horizontal)
+        modalPreferencesItem = NSCustomTouchBarItem(identifier: Self.modalPreferencesIdentifier)
+        modalPreferencesItem.view = modalPreferencesButton
+
         modalTouchBar.defaultItemIdentifiers = [
+            Self.modalPreferencesIdentifier,
             Self.modalSortIdentifier,
             Self.modalRowIdentifier,
         ]
@@ -220,6 +243,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         detailTouchBar.delegate = self
         triggerButton.target = self
         triggerButton.action = #selector(handleStripTap(_:))
+        modalPreferencesButton.target = self
+        modalPreferencesButton.action = #selector(handlePreferencesTap(_:))
         modalSortButton.target = self
         modalSortButton.action = #selector(handleSortTap(_:))
         detailBackButton.target = self
@@ -232,9 +257,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - NSTouchBarDelegate
 
-    func touchBar(_ touchBar: NSTouchBar,
+    public func touchBar(_ touchBar: NSTouchBar,
                   makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
         switch identifier {
+        case Self.modalPreferencesIdentifier: return modalPreferencesItem
         case Self.modalSortIdentifier:   return modalSortItem
         case Self.modalRowIdentifier:    return modalRowItem
         case Self.detailBackIdentifier:  return detailBackItem
@@ -247,7 +273,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - Install / uninstall
 
-    func install() {
+    public func install() {
         guard !installed, DFRBridge.isAvailable else { return }
         // Hide the system close-box. Our own close button on the right of
         // the modal handles user-triggered collapse, and we never want the
@@ -260,7 +286,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         startStripKeepAlive()
     }
 
-    func uninstall() {
+    public func uninstall() {
         guard installed else { return }
         stopStripKeepAlive()
         if detailVisible {
@@ -303,7 +329,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - Data binding
 
-    func update(items: [WatchItem], quotes: [String: Quote]) {
+    public func update(items: [WatchItem], quotes: [String: Quote]) {
         unsortedItems = items
         currentQuotes = quotes
         // Apply the persisted sort each tick — quotes update means the
@@ -365,7 +391,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     /// Push a freshly-fetched minute series in. AppDelegate calls this on
     /// every minute-tick or after an on-demand fetch.
-    func updateMinutes(symbol: String, points: [MinutePoint]) {
+    public func updateMinutes(symbol: String, points: [MinutePoint]) {
         currentMinutes[symbol] = points
         if detailSymbol == symbol {
             detailChartView.points = points
@@ -376,6 +402,10 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     /// Cycle through manual → pctDesc → pctAsc → manual on each tap. Persist
     /// to UserDefaults so the choice survives an app restart.
+    @objc private func handlePreferencesTap(_ sender: Any?) {
+        onOpenPreferences?()
+    }
+
     @objc private func handleSortTap(_ sender: Any?) {
         // 记录当前可见区域中间的 symbol，排序后恢复到这个位置附近
         let scrollTarget = getVisibleCenterSymbol()
@@ -576,11 +606,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - NSScrubberDataSource
 
-    func numberOfItems(for scrubber: NSScrubber) -> Int {
+    public func numberOfItems(for scrubber: NSScrubber) -> Int {
         currentItems.count
     }
 
-    func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
+    public func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
         let cell = scrubber.makeItem(
             withIdentifier: Self.scrubberCellIdentifier,
             owner: nil
@@ -595,7 +625,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
         return cell
     }
 
-    func scrubber(_ scrubber: NSScrubber, didSelectItemAt index: Int) {
+    public func scrubber(_ scrubber: NSScrubber, didSelectItemAt index: Int) {
         guard index >= 0, index < currentItems.count else { return }
         let item = currentItems[index]
         // 记录用户选择的 symbol，用于返回时恢复位置
@@ -605,7 +635,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate,
 
     // MARK: - NSScrubberFlowLayoutDelegate
 
-    func scrubber(_ scrubber: NSScrubber,
+    public func scrubber(_ scrubber: NSScrubber,
                   layout: NSScrubberFlowLayout,
                   sizeForItemAt itemIndex: Int) -> NSSize {
         guard itemIndex < currentItems.count else {

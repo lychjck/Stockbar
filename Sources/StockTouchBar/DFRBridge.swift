@@ -13,7 +13,7 @@ import ObjectiveC
 /// symbol/selector isn't found, the call becomes a no-op. The Touch Bar app
 /// will then just render nothing, instead of crashing on machines without a
 /// DFR display or on a future macOS that retires these symbols.
-enum DFRBridge {
+public enum DFRBridge {
 
     // MARK: - DFRFoundation framework
 
@@ -28,7 +28,7 @@ enum DFRBridge {
 
     /// True iff `DFRFoundation` was found and loaded. Callers should treat
     /// `false` as "Touch Bar features unavailable on this machine".
-    static var isAvailable: Bool { dfrHandle != nil }
+    public static var isAvailable: Bool { dfrHandle != nil }
 
     // MARK: - DFRElementSetControlStripPresenceForIdentifier
 

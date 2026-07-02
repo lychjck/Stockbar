@@ -37,6 +37,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     /// `AppDelegate` uses this to also re-sort the desktop card.
     var onSortModeChanged: ((SortMode) -> Void)?
 
+    /// Called when the user clicks the header's preferences button.
+    var onOpenPreferences: (() -> Void)?
+
     /// Weak ref to the hosting popover so we can resize it when content changes.
     weak var popover: NSPopover?
 
@@ -48,6 +51,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let phaseLabel = NSTextField(labelWithString: "")
     private let refreshButton = NSButton()
     private let configButton = NSButton()
+    private let preferencesButton = NSButton()
     private let quitButton = NSButton()
     private let addToggleButton = NSButton()
     private let desktopCardButton = NSButton()
@@ -128,6 +132,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         configureHeaderButton(desktopCardButton, symbol: "macwindow.on.rectangle", tooltip: "显示 / 隐藏桌面卡片", action: #selector(handleToggleDesktopCard))
         configureHeaderButton(sortButton, symbol: SortMode.current.symbol, tooltip: "排序", action: #selector(handleSort))
         applySortButtonTint()
+        configureHeaderButton(preferencesButton, symbol: "gearshape", tooltip: "设置", action: #selector(handleOpenPreferences))
         configureHeaderButton(configButton, symbol: "doc.text", tooltip: "Open watchlist.json", action: #selector(handleOpenConfig))
         configureHeaderButton(quitButton, symbol: "power", tooltip: "Quit StockBar", action: #selector(handleQuit))
 
@@ -142,6 +147,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         headerBar.addArrangedSubview(addToggleButton)
         headerBar.addArrangedSubview(desktopCardButton)
         headerBar.addArrangedSubview(refreshButton)
+        headerBar.addArrangedSubview(preferencesButton)
         headerBar.addArrangedSubview(configButton)
         headerBar.addArrangedSubview(quitButton)
 
@@ -741,6 +747,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
     @objc private func handleRefresh() { onRefresh?() }
     @objc private func handleOpenConfig() { onOpenConfig?() }
+    @objc private func handleOpenPreferences() { onOpenPreferences?() }
     @objc private func handleQuit() { onQuit?() }
     @objc private func handleToggleDesktopCard() { onToggleDesktopCard?() }
 

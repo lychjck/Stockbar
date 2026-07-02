@@ -7,10 +7,8 @@ let package = Package(
         .macOS(.v12)
     ],
     products: [
-        // Menu-bar app: existing behaviour, unchanged.
+        // Unified app: menu bar + Touch Bar in one executable.
         .executable(name: "StockBar", targets: ["StockBar"]),
-        // Touch Bar–only agent app: same data layer, rendered on the DFR strip.
-        .executable(name: "StockTouchBar", targets: ["StockTouchBar"]),
     ],
     targets: [
         // Pure data layer — models, fetchers, market-hours, on-disk store.
@@ -19,17 +17,18 @@ let package = Package(
             name: "StockCore",
             path: "Sources/StockCore"
         ),
-        // Status-bar UI (NSPopover, charts, desktop card).
-        .executableTarget(
-            name: "StockBar",
-            dependencies: ["StockCore"],
-            path: "Sources/StockBar"
-        ),
-        // Touch Bar UI (DFR control-strip presence + horizontal item bar).
-        .executableTarget(
+        // Touch Bar UI module — controllers, views, DFR bridge.
+        // Independent module that can be reused.
+        .target(
             name: "StockTouchBar",
             dependencies: ["StockCore"],
             path: "Sources/StockTouchBar"
+        ),
+        // Unified UI (menu bar + Touch Bar + desktop card).
+        .executableTarget(
+            name: "StockBar",
+            dependencies: ["StockCore", "StockTouchBar"],
+            path: "Sources/StockBar"
         ),
     ]
 )
