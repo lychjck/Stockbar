@@ -239,6 +239,12 @@ Direct calls to Tencent's free quote endpoints:
 
 ---
 
+## Friends
+
+- [Linux.do](https://linux.do) — Linux 中文社区
+
+---
+
 ## License
 
 Personal toy project. No warranty — quote data is Tencent's.
