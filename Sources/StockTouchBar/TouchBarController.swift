@@ -21,7 +21,7 @@ import StockCore
 @MainActor
 public final class TouchBarController: NSObject, NSTouchBarDelegate,
                                  NSScrubberDataSource, NSScrubberDelegate,
-                                 NSScrubberFlowLayoutDelegate {
+                                 @preconcurrency NSScrubberFlowLayoutDelegate {
 
     // MARK: - Identifiers
 
