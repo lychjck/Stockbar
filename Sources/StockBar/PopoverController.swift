@@ -16,6 +16,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     var minutes: [String: [MinutePoint]] = [:]        // key: normalizedSymbol
     var lastUpdated: Date?
     var marketPhase: MarketHours.Phase = .preMarket
+    var sentiment: MarketSentiment?
 
     /// Notified when the user clicks an action button in the header.
     var onRefresh: (() -> Void)?
@@ -50,6 +51,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     private let headerLabel = NSTextField(labelWithString: "")
     private let phaseLabel = NSTextField(labelWithString: "")
     private let indicesLabel = NSTextField(labelWithString: "")  // 三大指数显示
+    private let sentimentLabel = NSTextField(labelWithString: "")  // 市场情绪显示
     private let refreshButton = NSButton()
     private let configButton = NSButton()
     private let preferencesButton = NSButton()
@@ -131,9 +133,15 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         phaseLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         phaseLabel.textColor = .secondaryLabelColor
 
-        indicesLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        indicesLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         indicesLabel.textColor = .secondaryLabelColor
         indicesLabel.alignment = .left
+        indicesLabel.maximumNumberOfLines = 1
+        indicesLabel.lineBreakMode = .byTruncatingTail
+        sentimentLabel.lineBreakMode = .byTruncatingTail
+        sentimentLabel.maximumNumberOfLines = 1
+        sentimentLabel.allowsDefaultTighteningForTruncation = true
+        sentimentLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         configureHeaderButton(refreshButton, symbol: "arrow.clockwise", tooltip: "Refresh", action: #selector(handleRefresh))
         configureHeaderButton(addToggleButton, symbol: "plus.circle", tooltip: "Add stock / ETF", action: #selector(handleToggleAddBar))
@@ -148,9 +156,15 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         spacer.translatesAutoresizingMaskIntoConstraints = false
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
 
-        // headerBar.addArrangedSubview(headerLabel)
-        // headerBar.addArrangedSubview(phaseLabel)
-        headerBar.addArrangedSubview(indicesLabel)
+        let infoStack = NSStackView()
+        infoStack.orientation = .vertical
+        infoStack.alignment = .leading
+        infoStack.spacing = 1
+        infoStack.translatesAutoresizingMaskIntoConstraints = false
+        infoStack.addArrangedSubview(indicesLabel)
+        infoStack.addArrangedSubview(sentimentLabel)
+
+        headerBar.addArrangedSubview(infoStack)
         headerBar.addArrangedSubview(spacer)
         headerBar.addArrangedSubview(sortButton)
         headerBar.addArrangedSubview(addToggleButton)
@@ -386,6 +400,66 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         phaseLabel.stringValue = humanPhase(marketPhase)
         phaseLabel.textColor = marketPhase.isLive ? NSColor.systemRed.withAlphaComponent(0.8) : .secondaryLabelColor
         updateIndicesLabel()
+        updateSentimentLabel()
+    }
+
+    private func updateSentimentLabel() {
+        let labelColor = NSColor(calibratedWhite: 0.86, alpha: 0.72)
+        let neutralColor = NSColor(calibratedWhite: 0.98, alpha: 0.95)
+        let separatorColor = NSColor(calibratedWhite: 0.82, alpha: 0.42)
+        let upColor = NSColor(calibratedRed: 1.00, green: 0.30, blue: 0.25, alpha: 1.0)
+        let downColor = NSColor(calibratedRed: 0.24, green: 0.86, blue: 0.48, alpha: 1.0)
+
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: labelColor
+        ]
+        let neutralValueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: neutralColor
+        ]
+        let ratioValueAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: neutralColor
+        ]
+        let separatorAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: separatorColor
+        ]
+
+        let attrString = NSMutableAttributedString()
+        attrString.append(NSAttributedString(string: "涨跌 ", attributes: labelAttrs))
+        if let s = sentiment {
+            let ratio = s.upDownRatio
+            var upAttrs = ratioValueAttrs
+            upAttrs[.foregroundColor] = upColor
+            var downAttrs = ratioValueAttrs
+            downAttrs[.foregroundColor] = downColor
+            var ratioAttrs = ratioValueAttrs
+            ratioAttrs[.foregroundColor] = ratio > 0.6 ? upColor : (ratio < 0.4 ? downColor : neutralColor)
+
+            attrString.append(NSAttributedString(string: "\(s.upCount)", attributes: upAttrs))
+            attrString.append(NSAttributedString(string: "/", attributes: separatorAttrs))
+            attrString.append(NSAttributedString(string: "\(s.downCount)", attributes: downAttrs))
+            attrString.append(NSAttributedString(string: "  \(Int(ratio * 100))%", attributes: ratioAttrs))
+        } else {
+            attrString.append(NSAttributedString(string: "--/--", attributes: neutralValueAttrs))
+        }
+        attrString.append(NSAttributedString(string: "  成交 ", attributes: labelAttrs))
+        if let totalAmount = sentiment?.totalAmount {
+            attrString.append(NSAttributedString(string: Self.compactAmount(totalAmount), attributes: neutralValueAttrs))
+        } else {
+            attrString.append(NSAttributedString(string: "--亿", attributes: neutralValueAttrs))
+        }
+
+        sentimentLabel.attributedStringValue = attrString
+    }
+
+    private static func compactAmount(_ amountInYi: Double) -> String {
+        if amountInYi >= 10_000 {
+            return String(format: "%.2f万亿", amountInYi / 10_000)
+        }
+        return String(format: "%.0f亿", amountInYi)
     }
 
     /// Build the three-major-indices summary (沪指, 深指, 创业板).
@@ -396,7 +470,9 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         for (idx, sym) in indices.enumerated() {
             guard let q = quotes[sym] else { continue }
             let pctStr = String(format: "%+.2f%%", q.pct)
-            let color: NSColor = q.pct >= 0 ? .systemRed : .systemGreen
+            let color = q.pct >= 0
+                ? NSColor(calibratedRed: 1.00, green: 0.30, blue: 0.25, alpha: 1.0)
+                : NSColor(calibratedRed: 0.24, green: 0.86, blue: 0.48, alpha: 1.0)
 
             // Short alias: 沪指/深指/创业
             let alias: String
@@ -411,7 +487,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
             let text = "\(alias) \(pctStr)"
             let attrs: [NSAttributedString.Key: Any] = [
                 .foregroundColor: color,
-                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
             ]
             attrString.append(NSAttributedString(string: text, attributes: attrs))
 

@@ -140,7 +140,17 @@ public final class WatchlistStore {
     /// Calls `onChange` on the main queue when the file is rewritten.
     /// Returns a DispatchSourceFileSystemObject that the caller must retain.
     public func watchForChanges(_ onChange: @escaping () -> Void) -> DispatchSourceFileSystemObject? {
-        let fd = open(configPath, O_EVTONLY)
+        let targetURL = URL(fileURLWithPath: configPath)
+        let watchPath: String
+        if FileManager.default.fileExists(atPath: configPath) {
+            watchPath = configPath
+        } else {
+            let parent = targetURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+            watchPath = parent.path
+        }
+
+        let fd = open(watchPath, O_EVTONLY)
         guard fd >= 0 else { return nil }
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,

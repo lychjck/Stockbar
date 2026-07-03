@@ -4,3 +4,20 @@ Package.resolved
 build/
 *.xcodeproj/
 .DS_Store
+
+# Local debug/build artifacts
+*.log
+*.patch
+*.orig
+*.rej
+StockBar.app.zip
+grep_*.txt
+run_log.txt
+app.log
+click_menu.py
+list_windows.py
+original_popover.swift
+test_*.swift
+
+# Local unfinished scratch source
+Sources/StockCore/SectorFetcher.swift

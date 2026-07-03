@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var quotes: [String: Quote] = [:]
     private var minutes: [String: [MinutePoint]] = [:]
     private var lastFetchedAt: Date?
+    private var sentiment: MarketSentiment?
 
     // Timers
     private var quoteTimer: Timer?
@@ -260,12 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // Push freshest data into the controller before showing.
             pushDataToController()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Activate so the popover can receive keyboard events.
-            NSApp.activate(ignoringOtherApps: true)
-            // Pull minute data for everything not yet cached today.
-            Task { await self.fetchAllMinutesIfNeeded() }
-            // And refresh the quotes too.
-            Task { await self.refreshQuotes(force: true) }
+
+            Task { await self.refreshAll(force: true) }
         }
     }
 
@@ -277,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popoverController.items = watchlist.activeItems
         popoverController.quotes = quotes
         popoverController.minutes = minutes
+        popoverController.sentiment = sentiment
         popoverController.lastUpdated = lastFetchedAt
         popoverController.marketPhase = MarketHours.currentPhase()
         popoverController.reload()
@@ -318,7 +316,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let interval = MarketHours.recommendedInterval(base: base)
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in await self.refreshQuotes(force: false) }
+            Task { @MainActor in
+                await self.refreshQuotes(force: false)
+                await self.refreshSentiment()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         quoteTimer = timer
@@ -344,6 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.watchlist = self.store.load()
+                self.startWatchingConfigFile()
                 self.startQuoteTimer()
                 await self.refreshAll(force: true)
             }
@@ -351,8 +353,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     /// Re-fetch quotes (and minutes if popover open).
-    private func refreshAll(force: Bool) async {
+    private func refreshAll(force: Bool = false) async {
         await refreshQuotes(force: force)
+        await refreshSentiment()
         if popover.isShown {
             await fetchAllMinutesIfNeeded(forceAll: force)
         }
@@ -390,6 +393,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } catch {
             // Keep stale quotes; mark in tooltip.
             statusItem?.button?.toolTip = "Last fetch failed: \(error)"
+        }
+    }
+
+    private let sentimentFetcher = MarketSentimentFetcher()
+
+    private func refreshSentiment() async {
+        do {
+            let s = try await sentimentFetcher.fetch()
+            self.sentiment = s
+            if popover.isShown { pushDataToController() }
+            pushDataToCard()
+        } catch {
+            print("fetch sentiment error: \(error)")
         }
     }
 

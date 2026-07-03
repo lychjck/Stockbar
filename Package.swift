@@ -15,7 +15,10 @@ let package = Package(
         // No AppKit, no UI. Shared by every front-end target.
         .target(
             name: "StockCore",
-            path: "Sources/StockCore"
+            path: "Sources/StockCore",
+            exclude: [
+                "SectorFetcher.swift",
+            ]
         ),
         // Touch Bar UI module — controllers, views, DFR bridge.
         // Independent module that can be reused.
@@ -28,7 +31,17 @@ let package = Package(
         .executableTarget(
             name: "StockBar",
             dependencies: ["StockCore", "StockTouchBar"],
-            path: "Sources/StockBar"
+            path: "Sources/StockBar",
+            exclude: [
+                "AppDelegate.swift.orig",
+                "AppDelegate.swift.rej",
+                "AppDelegate.swift.rej.orig",
+            ]
+        ),
+        .testTarget(
+            name: "StockCoreTests",
+            dependencies: ["StockCore"],
+            path: "Tests/StockCoreTests"
         ),
     ]
 )
