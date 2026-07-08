@@ -229,9 +229,15 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         detailContainer.translatesAutoresizingMaskIntoConstraints = false
         detailContainer.wantsLayer = true
 
+        // Add click recognizer to collapse when clicking the detail area
+        let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDetailClick))
+        detailContainer.addGestureRecognizer(clickGesture)
+
         detailTitle.font = NSFont.systemFont(ofSize: 18, weight: .bold)
         detailTitle.textColor = .labelColor
         detailTitle.translatesAutoresizingMaskIntoConstraints = false
+        detailTitle.lineBreakMode = .byTruncatingTail
+        detailTitle.cell?.truncatesLastVisibleLine = true
         detailContainer.addSubview(detailTitle)
 
         // Use rounded tabular digits for the subtitle (price · pct · prev).
@@ -297,6 +303,7 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
 
             detailTitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 6),
             detailTitle.leadingAnchor.constraint(equalTo: detailContainer.leadingAnchor, constant: 12),
+            detailTitle.trailingAnchor.constraint(lessThanOrEqualTo: detailSubtitle.leadingAnchor, constant: -12),
 
             detailSubtitle.topAnchor.constraint(equalTo: detailContainer.topAnchor, constant: 6),
             detailSubtitle.trailingAnchor.constraint(equalTo: detailContainer.trailingAnchor, constant: -12),
@@ -340,6 +347,8 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         for (sym, row) in rowViews {
             let q = quotes[sym]
             row.update(item: row.item, quote: q, minutes: minutes[sym] ?? [], prevClose: q?.prevClose)
+            // Keep the selected row hidden when expanded
+            row.isHidden = (sym == selectedSymbol)
         }
         // Drop selection if the previously selected symbol is no longer in the list.
         if let s = selectedSymbol, rowViews[s] == nil {
@@ -571,6 +580,8 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         }
         for (k, row) in rowViews {
             row.isSelected = (k == selectedSymbol)
+            // Hide the selected row when expanded, show it when collapsed
+            row.isHidden = (k == selectedSymbol)
         }
         // Insert / remove the inline detail view in the rows stack.
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -717,13 +728,19 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
         let q = quotes[sym]
         let pts = minutes[sym] ?? []
 
+        // When expanded, show full name + alias (if any) + code
         let titleText: String
-        if !item.alias.isEmpty {
-            titleText = "\(item.alias)  \(item.code)"
-        } else if let q {
-            titleText = "\(q.name)  \(item.code)"
+        if let q {
+            if !item.alias.isEmpty {
+                // Has alias: show "FullName (Alias) Code"
+                titleText = "\(q.name) (\(item.alias))  \(item.code)"
+            } else {
+                // No alias: show "FullName Code"
+                titleText = "\(q.name)  \(item.code)"
+            }
         } else {
-            titleText = item.code
+            // No quote data: fallback to alias or code
+            titleText = item.alias.isEmpty ? item.code : "\(item.alias)  \(item.code)"
         }
         detailTitle.stringValue = titleText
 
@@ -885,6 +902,25 @@ final class PopoverController: NSViewController, NSTextFieldDelegate {
     @objc private func handleOpenPreferences() { onOpenPreferences?() }
     @objc private func handleQuit() { onQuit?() }
     @objc private func handleToggleDesktopCard() { onToggleDesktopCard?() }
+
+    @objc private func handleDetailClick() {
+        // Collapse the detail view when clicking on it
+        if selectedSymbol != nil {
+            selectedSymbol = nil
+            for (_, row) in rowViews {
+                row.isSelected = false
+                row.isHidden = false
+            }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.25
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                relocateDetailContainer()
+                onSelectionChanged?(nil)
+                reload()
+            })
+        }
+    }
 
     // MARK: - Sort menu
 

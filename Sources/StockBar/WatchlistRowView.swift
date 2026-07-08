@@ -144,21 +144,22 @@ final class WatchlistRowView: NSView {
         if let q = quote {
             priceLabel.stringValue = formatPrice(q.price)
             pctBadge.label.stringValue = formatPct(q.pct)
-            
+
             // Custom high-vibrancy colors for dark mode glassmorphism
             let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
             let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
-            
+
             let isUp = q.pct > 0
             let isDown = q.pct < 0
             let fgColor: NSColor = isUp ? neonRed : (isDown ? neonGreen : .secondaryLabelColor)
             let bgColor: NSColor = isUp ? neonRed.withAlphaComponent(0.2) : (isDown ? neonGreen.withAlphaComponent(0.2) : .clear)
-            
+
             pctBadge.label.textColor = fgColor
             pctBadge.layer?.backgroundColor = bgColor.cgColor
-            
+
             priceLabel.textColor = .labelColor
-            toolTip = "high \(formatPrice(q.high)) · low \(formatPrice(q.low)) · prev \(formatPrice(q.prevClose))"
+            // Don't show tooltip when selected (expanded) since detail view shows this info
+            toolTip = isSelected ? nil : "high \(formatPrice(q.high)) · low \(formatPrice(q.low)) · prev \(formatPrice(q.prevClose))"
             // Keep the sparkline's color in sync with the live pct — pass the
             // realtime price as the "latest" reference (the minute series can
             // lag the quote by up to 30 s).
