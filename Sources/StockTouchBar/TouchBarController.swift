@@ -645,19 +645,32 @@ public final class TouchBarController: NSObject, NSTouchBarDelegate,
         let sym = item.normalizedSymbol
         let quote = currentQuotes[sym]
         let alias = item.alias.isEmpty ? (quote?.name ?? item.code) : item.alias
-        let pct = pctString(quote?.pct)
+        let priceStr = quote.map { String(format: "%.2f", $0.price) } ?? "—"
+        let line1 = "\(alias) \(priceStr)"
 
-        let aliasWidth = StockScrubberItemView.width(
-            of: alias,
+        // 第二行：涨跌幅 + 今日盈亏
+        let pct = pctString(quote?.pct)
+        var line2 = pct
+
+        if let shares = item.shares, shares > 0,
+           let price = quote?.price, let prevClose = quote?.prevClose {
+            let dayProfit = (price - prevClose) * shares
+            let profitSign = dayProfit >= 0 ? "+" : ""
+            let profitStr = String(format: " %@%.0f", profitSign, dayProfit)
+            line2 += profitStr
+        }
+
+        let line1Width = StockScrubberItemView.width(
+            of: line1,
             font: StockScrubberItemView.nameFont
         )
-        let pctWidth = StockScrubberItemView.width(
-            of: pct,
+        let line2Width = StockScrubberItemView.width(
+            of: line2,
             font: StockScrubberItemView.pctFont
         )
-        let inner = max(aliasWidth, pctWidth)
+        let inner = max(line1Width, line2Width)
         let padded = ceil(inner) + 16
-        return NSSize(width: max(56, min(120, padded)), height: 30)
+        return NSSize(width: max(80, min(180, padded)), height: 30)
     }
 
     // MARK: - Formatters
@@ -766,18 +779,47 @@ final class StockScrubberItemView: NSScrubberItemView {
 
     func configure(item: WatchItem, quote: Quote?, upColor: NSColor, downColor: NSColor) {
         let alias = item.alias.isEmpty ? (quote?.name ?? item.code) : item.alias
-        nameLabel.stringValue = alias
+        let priceStr = quote.map { String(format: "%.2f", $0.price) } ?? "—"
+        nameLabel.stringValue = "\(alias) \(priceStr)"
 
+        // 第二行：涨跌幅 + 持仓盈亏（如果有）
+        let attr = NSMutableAttributedString()
+
+        // 涨跌幅部分
         if let pct = quote?.pct {
             let sign = pct > 0 ? "+" : ""
-            pctLabel.stringValue = sign + String(format: "%.2f%%", pct)
-            if pct > 0 { pctLabel.textColor = upColor }
-            else if pct < 0 { pctLabel.textColor = downColor }
-            else { pctLabel.textColor = .labelColor }
+            let pctStr = sign + String(format: "%.2f%%", pct)
+            let pctColor: NSColor
+            if pct > 0 { pctColor = upColor }
+            else if pct < 0 { pctColor = downColor }
+            else { pctColor = .labelColor }
+
+            attr.append(NSAttributedString(string: pctStr, attributes: [
+                .font: Self.pctFont,
+                .foregroundColor: pctColor
+            ]))
         } else {
-            pctLabel.stringValue = "—"
-            pctLabel.textColor = .secondaryLabelColor
+            attr.append(NSAttributedString(string: "—", attributes: [
+                .font: Self.pctFont,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]))
         }
+
+        // 今日盈亏部分（如果有持仓）
+        if let shares = item.shares, shares > 0,
+           let price = quote?.price, let prevClose = quote?.prevClose {
+            let dayProfit = (price - prevClose) * shares
+            let profitSign = dayProfit >= 0 ? "+" : ""
+            let profitStr = String(format: " %@%.0f", profitSign, dayProfit)
+            let profitColor = dayProfit >= 0 ? upColor : downColor
+
+            attr.append(NSAttributedString(string: profitStr, attributes: [
+                .font: Self.pctFont,
+                .foregroundColor: profitColor
+            ]))
+        }
+
+        pctLabel.attributedStringValue = attr
     }
 
     static func width(of string: String, font: NSFont) -> CGFloat {

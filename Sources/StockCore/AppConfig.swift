@@ -6,13 +6,18 @@ import Foundation
 public struct AppConfig: Codable {
     public var enableMenuBar: Bool
     public var enableTouchBar: Bool
+    /// Optional tzzb API base URL (e.g. "http://127.0.0.1:8080").
+    /// When set, StockBar fetches positions from tzzb instead of watchlist.json.
+    public var tzzbApiUrl: String?
 
     public init(
         enableMenuBar: Bool = true,
-        enableTouchBar: Bool = true
+        enableTouchBar: Bool = true,
+        tzzbApiUrl: String? = nil
     ) {
         self.enableMenuBar = enableMenuBar
         self.enableTouchBar = enableTouchBar
+        self.tzzbApiUrl = tzzbApiUrl
     }
 
     // MARK: - Persistence

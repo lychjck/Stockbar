@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = WatchlistStore()
     private let quoteFetcher = QuoteFetcher()
     private let minuteFetcher = MinuteFetcher()
+    private var tzzbClient: TzzbClient?
 
     private var watchlist = Watchlist()
     private var quotes: [String: Quote] = [:]
@@ -66,6 +67,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Initialize tzzb client if configured
+        if let apiUrl = appConfig.tzzbApiUrl, !apiUrl.isEmpty {
+            tzzbClient = TzzbClient(baseURL: apiUrl)
+        }
+
+        // Load watchlist (will be overridden by tzzb if available)
         watchlist = store.load()
 
         // ---- Status item: conditionally create based on config
@@ -244,6 +251,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 teardownTouchBar()
             }
         }
+
+        // tzzb API URL changed
+        if oldConfig.tzzbApiUrl != newConfig.tzzbApiUrl {
+            if let apiUrl = newConfig.tzzbApiUrl, !apiUrl.isEmpty {
+                tzzbClient = TzzbClient(baseURL: apiUrl)
+                // Trigger immediate refresh to load positions
+                Task { await refreshAll(force: true) }
+            } else {
+                tzzbClient = nil
+                // Fall back to local watchlist
+                watchlist = store.load()
+                Task { await refreshAll(force: true) }
+            }
+        }
     }
 
     // MARK: - Popover
@@ -354,11 +375,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     /// Re-fetch quotes (and minutes if popover open).
     private func refreshAll(force: Bool = false) async {
+        let logPath = NSHomeDirectory() + "/stockbar-debug.log"
+        func log(_ msg: String) {
+            let line = "\(Date()): \(msg)\n"
+            if let data = line.data(using: .utf8) {
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                } else {
+                    try? data.write(to: URL(fileURLWithPath: logPath))
+                }
+            }
+            print(msg)
+        }
+
+        // Try to load positions from tzzb first
+        if let client = tzzbClient {
+            log("🔵 TzzbClient exists, fetching positions...")
+            if let positions = await client.fetchPositions() {
+                log("🟢 Fetched \(positions.count) positions from tzzb")
+                let items = TzzbClient.positionsToWatchItems(positions)
+                if !items.isEmpty {
+                    log("🟢 Converted to \(items.count) watch items")
+                    // Update watchlist with tzzb positions
+                    watchlist.items = items
+                    watchlist.groups = ["default": items]
+                    watchlist.active_group = "default"
+                    log("🟢 Updated watchlist with tzzb data")
+                    log("🟢 Active items count: \(watchlist.activeItems.count)")
+                } else {
+                    log("🔴 No items after conversion")
+                }
+            } else {
+                log("🔴 Failed to fetch positions from tzzb")
+            }
+        } else {
+            log("🔴 No TzzbClient configured")
+        }
+
         await refreshQuotes(force: force)
         await refreshSentiment()
         if popover.isShown {
             await fetchAllMinutesIfNeeded(forceAll: force)
         }
+
+        // Important: Push updated data to UI after loading from tzzb
+        pushDataToController()
+        pushDataToCard()
+        pushDataToTouchBar()
     }
 
     private func refreshQuotes(force: Bool) async {

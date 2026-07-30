@@ -9,11 +9,20 @@ public struct WatchItem: Codable, Hashable {
     public var code: String
     /// User-defined alias to show in menu, e.g. "卫星".
     public var alias: String
+    /// Position info from tzzb (optional) — cost price.
+    public var cost: Double?
+    /// Position info from tzzb (optional) — shares held.
+    public var shares: Double?
+    /// Position info from tzzb (optional) — account name.
+    public var account: String?
 
-    public init(symbol: String? = nil, code: String, alias: String) {
+    public init(symbol: String? = nil, code: String, alias: String, cost: Double? = nil, shares: Double? = nil, account: String? = nil) {
         self.symbol = symbol
         self.code = code
         self.alias = alias
+        self.cost = cost
+        self.shares = shares
+        self.account = account
     }
 
     /// Normalized symbol: always with sh/sz prefix.

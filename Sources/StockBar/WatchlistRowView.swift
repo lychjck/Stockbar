@@ -35,6 +35,8 @@ final class WatchlistRowView: NSView {
     private let priceLabel = NSTextField(labelWithString: "")
     private let pctBadge = PillBadge()
     private let sparkline = ChartView(frame: .zero)
+    private let costLabel = NSTextField(labelWithString: "")
+    private let profitLabel = NSTextField(labelWithString: "")
 
     init(item: WatchItem) {
         self.item = item
@@ -42,7 +44,7 @@ final class WatchlistRowView: NSView {
         wantsLayer = true
         sparkline.style = .mini
 
-        for field in [aliasLabel, codeLabel, priceLabel] {
+        for field in [aliasLabel, codeLabel, priceLabel, costLabel, profitLabel] {
             field.translatesAutoresizingMaskIntoConstraints = false
             field.drawsBackground = false
             field.isBezeled = false
@@ -62,8 +64,13 @@ final class WatchlistRowView: NSView {
         codeLabel.font = Self.monoFont(size: 12, weight: .medium)
         // Numbers use the rounded design so they look more modern + match Stocks app.
         priceLabel.font = Self.roundedDigitFont(size: 15, weight: .semibold)
-        
+
         pctBadge.label.font = Self.roundedDigitFont(size: 13, weight: .bold)
+
+        // Cost and profit labels
+        costLabel.textColor = .secondaryLabelColor
+        costLabel.font = Self.roundedDigitFont(size: 11, weight: .regular)
+        profitLabel.font = Self.roundedDigitFont(size: 11, weight: .medium)
 
         sparkline.translatesAutoresizingMaskIntoConstraints = false
         addSubview(sparkline)
@@ -72,12 +79,18 @@ final class WatchlistRowView: NSView {
             heightAnchor.constraint(equalToConstant: 40),
 
             aliasLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            aliasLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            aliasLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
 
             codeLabel.leadingAnchor.constraint(equalTo: aliasLabel.trailingAnchor, constant: 8),
-            codeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            codeLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
             codeLabel.widthAnchor.constraint(equalToConstant: 60),
-            codeLabel.trailingAnchor.constraint(lessThanOrEqualTo: priceLabel.leadingAnchor, constant: -12),
+
+            // Cost and profit on second line (below alias)
+            costLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            costLabel.topAnchor.constraint(equalTo: aliasLabel.bottomAnchor, constant: 2),
+
+            profitLabel.leadingAnchor.constraint(equalTo: costLabel.trailingAnchor, constant: 8),
+            profitLabel.topAnchor.constraint(equalTo: aliasLabel.bottomAnchor, constant: 2),
 
             // Sparkline pinned to the right; before it: pct + price (right-aligned)
             sparkline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
@@ -140,6 +153,24 @@ final class WatchlistRowView: NSView {
         }
         aliasLabel.stringValue = aliasText
         codeLabel.stringValue = item.code
+
+        // Show cost and today's profit if available
+        if let cost = item.cost, let shares = item.shares, let q = quote {
+            costLabel.stringValue = "成本 \(formatPrice(cost))"
+            // 今日盈亏 = (当前价 - 昨收价) × 持仓数量
+            let dayProfit = (q.price - q.prevClose) * shares
+            let dayProfitPct = (q.price - q.prevClose) / q.prevClose * 100
+            profitLabel.stringValue = String(format: "%+.0f (%+.1f%%)", dayProfit, dayProfitPct)
+
+            // Custom high-vibrancy colors for dark mode glassmorphism
+            let neonRed = NSColor(calibratedRed: 1.0, green: 0.27, blue: 0.22, alpha: 1.0)
+            let neonGreen = NSColor(calibratedRed: 0.19, green: 0.84, blue: 0.29, alpha: 1.0)
+
+            profitLabel.textColor = dayProfit >= 0 ? neonRed : neonGreen
+        } else {
+            costLabel.stringValue = ""
+            profitLabel.stringValue = ""
+        }
 
         if let q = quote {
             priceLabel.stringValue = formatPrice(q.price)
